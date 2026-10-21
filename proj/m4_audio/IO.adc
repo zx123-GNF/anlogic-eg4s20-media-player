@@ -1,0 +1,77 @@
+#-----------------------------------------------------------------------------
+#  IO.adc  --  M4 pin constraints (AC208 / EG4S20BG256)
+#
+#  Signal names must match the m4_top port list exactly.
+#  Pin numbers come from the AC208 pin table (AC201-EG4S20管脚信息表.xlsx) and
+#  docs/research/hw-facts.md §7/§8:
+#
+#      clk        K14  50 MHz oscillator
+#      rst_n      H14  KEY2 (low active)
+#      key0_n     F7   KEY0 (low active) next image / long press = pause
+#      key1_n     E7   KEY1 (low active) previous image
+#      SD_CLK     M2   TF card SCLK
+#      SD_MOSI    L3   TF card MOSI
+#      SD_MISO    K6   TF card MISO
+#      SD_CS      R2   TF card CS
+#      led[0..3]  M12 R16 R15 T15
+#      SEG7_SCLK  T14  74HC595 SHCP (shift clock)
+#      SEG7_RCLK  R12  74HC595 STCP (latch clock)
+#      SEG7_DIO   R14  74HC595 DS   (serial data)
+#
+#  ---- M4 audio (pin table rows 83..90, the AUTHORITATIVE list) --------------
+#
+#      I2S_MCLK    B8   WM8960 MCLK   (12.288136 MHz from pll_m4_audio)
+#      I2S_BCLK    C8   WM8960 BCLK   (3.072 MHz, FPGA is master)
+#      I2S_DACLRC  A8   WM8960 DACLRC (48 kHz, FPGA is master)
+#      I2S_DACDAT  A7   WM8960 DACDAT (serial data to the codec)
+#      I2S_ADCLRC  C7   WM8960 ADCLRC (driven with the same 48 kHz, ADC unused)
+#      I2C_SCL     L16  shared I2C bus clock (codec + 24LC256 + PCF8563)
+#      I2C_SDA     M16  shared I2C bus data (tri-state, pull-up)
+#
+#  NOTE: the vendor board test IO.adc maps I2S_DI=C7, I2S_DO=A8, I2S_RCLK=A7,
+#  which is shifted by one signal against the pin table (and leaves C6 unused).
+#  M4 follows the pin table / schematic: A8 = DACLRC, A7 = DACDAT, C7 = ADCLRC.
+#  See docs/research/hw-facts.md §7 and m4-report.md §10 (M4-R2).
+#
+#  The in-die SDRAM interface never appears here: it is a hard macro on
+#  dedicated pads, not user I/O.
+#-----------------------------------------------------------------------------
+set_pin_assignment	{ clk }	{ LOCATION = K14; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+set_pin_assignment	{ rst_n }	{ LOCATION = H14; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+set_pin_assignment	{ key0_n }	{ LOCATION = F7; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+set_pin_assignment	{ key1_n }	{ LOCATION = E7; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+
+set_pin_assignment	{ SD_CLK }	{ LOCATION = M2; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ SD_MOSI }	{ LOCATION = L3; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ SD_MISO }	{ LOCATION = K6; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+set_pin_assignment	{ SD_CS }	{ LOCATION = R2; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+
+set_pin_assignment	{ led[0] }	{ LOCATION = M12; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ led[1] }	{ LOCATION = R16; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ led[2] }	{ LOCATION = R15; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ led[3] }	{ LOCATION = T15; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+
+set_pin_assignment	{ SEG7_SCLK }	{ LOCATION = T14; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ SEG7_RCLK }	{ LOCATION = R12; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ SEG7_DIO }	{ LOCATION = R14; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+
+set_pin_assignment	{ O_tmds_ch0_p }	{ LOCATION = D11; IOSTANDARD = LVDS33_E; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ O_tmds_ch1_p }	{ LOCATION = C11; IOSTANDARD = LVDS33_E; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ O_tmds_ch2_p }	{ LOCATION = F10; IOSTANDARD = LVDS33_E; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ O_tmds_clk_p }	{ LOCATION = B10; IOSTANDARD = LVDS33_E; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+
+#-----------------------------------------------------------------------------
+#  M4 audio pins
+#-----------------------------------------------------------------------------
+set_pin_assignment	{ I2S_MCLK }	{ LOCATION = B8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ I2S_BCLK }	{ LOCATION = C8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ I2S_DACLRC }	{ LOCATION = A8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ I2S_DACDAT }	{ LOCATION = A7; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ I2S_ADCLRC }	{ LOCATION = C7; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+
+# the I2C bus is open drain in I2C terms; SCL is driven push-pull by the master
+# (only one master on this board), SDA is tri-stated for the ACK bit and for the
+# idle state.  Internal pull-ups are enabled as a safety net on top of the
+# external ones (the codec / EEPROM / RTC share the same two wires).
+set_pin_assignment	{ I2C_SCL }	{ LOCATION = L16; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = PULLUP; }
+set_pin_assignment	{ I2C_SDA }	{ LOCATION = M16; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = PULLUP; }
