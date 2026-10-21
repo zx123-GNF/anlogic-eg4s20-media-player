@@ -4,14 +4,19 @@
 > 方式：只读。管脚表 xlsx 用 openpyxl 全量导出；PDF 用自写 FlateDecode + Tj 文本抽取；Altium `.SchDoc` 二进制按 `LibReference`/`|Text=` 记录解析器件与网络名；`.adc`/`.al`/`.qor`/`.area` 直接读文本。
 > 本文件是本次任务唯一新增产物，原始资料未做任何修改。
 
+> ⚠️ **重大更正（2026-10-21，本文件第 1 版结论错误）**：**这颗 FPGA 芯片内部自带 SDRAM**。官方《2026 全国大学生嵌入式芯片与系统设计竞赛 FPGA 赛道选题指南（安路）》推荐平台 1 明确写：`EG4S20BG256 … 片内集成 SDRAM：2Mx32bit`（[指南 PDF](anlogic_2026_guide.pdf)）；安路官网 SALEAGLE 4 系列也写"部分器件内置 64M bit SDR SDRAM"（[产品页](https://www.anlogic.com/product/fpga/saleagle)）。所以：
+> - 板级 BOM/管脚表里没有 SDRAM 是对的（它不占引脚），但**不代表不能用**；`01-board_test\src\5640\sdram_ctrl_4p\sdram_ip.v` 例化的 `EG_PHY_SDRAM_2M_32` 就是这片**片内 8 MB SDRAM 的硬宏**，可以直接拿来做帧缓存。
+> - 因此下文 §0 第 1/6 条、§4.1、§9.1–9.2 中"板上没有 SDRAM / 512 KB 装不下 640×480"的结论**作废**（保留原文以便追溯错误来源，但请以本条为准）。
+> - 512 KB 外部 SRAM 仍是可用的（16 bit、10 ns），适合做解码缓冲/条带缓存，不再承担整帧缓存。
+
 ## 0. 结论速览（先看这 6 条）
 
-1. **板上没有 SDRAM**。管脚表、`IO.adc`、核心板/底板原理图器件表里都没有 SDRAM 信号或颗粒；`01-board_test` 里那份 SDRAM 控制器是从别的板（`ov5640_sdram_hdmi_tft`，2020 年工程）拷来的死代码，信号只连内部 wire，无任何顶层引脚与约束。
+1. ~~**板上没有 SDRAM**~~ → **更正：芯片内部有 8 MB SDRAM（2M×32），板级无外置颗粒但片内可用**（见文首更正）。板级管脚表/原理图确实没有 SDRAM 信号，因为它是片内硬宏、不占引脚；`01-board_test` 里那份 SDRAM 控制器用的正是片内 `EG_PHY_SDRAM_2M_32`。
 2. **唯一外部存储器是 512 KB 异步 SRAM**：IS61WV25616EDBLL-10TLI（256K×16，4 Mbit，10 ns，44-pin TSOP II）。
 3. **HDMI 是 FPGA 直接打 TMDS**：4 对差分（CLK + D0/D1/D2）直接接 FPGA LVDS 引脚，板上**没有 HDMI 发送芯片**，只有 2 片 AZ1045-04F ESD 阵列 + HDMI 母座 J4；**DDC 只有上拉、没接 FPGA，HPD/CEC/EDID 都没有**。
 4. **TF 卡是 SPI 模式（1 bit）**，4 根线：CLK/MOSI/MISO/CS，无 CD/WP。
 5. **音频走 WM8960 模拟通路**（I2S + I2C），MCLK 由 FPGA PLL 给 18.432 MHz；**HDMI 里没有音频**（板测例程把 HDMI 的 I2S 输入接死 0）。
-6. **640×480 RGB565 帧缓存 = 600 KB > 512 KB SRAM，塞不下**。要用 12bpp(450 KB) / 8bpp(300 KB) / 降分辨率，或外挂存储（板上没有）。
+6. ~~**640×480 RGB565 帧缓存 = 600 KB > 512 KB SRAM，塞不下**~~ → **更正：帧缓存放片内 8 MB SDRAM，不受 512 KB SRAM 限制**（见文首更正）。
 
 ---
 
@@ -72,20 +77,21 @@
 
 ## 4. 存储器
 
-### 4.1 SDRAM —— **板上没有**
+### 4.1 SDRAM —— **芯片内部有（8 MB），板上无需颗粒**（本节已更正）
 
 | 项 | 结论 |
 | --- | --- |
-| 型号 / 容量 / 位宽 / bank / 行列 / 频率 | **资料未显示（板上无此器件）** |
+| 位置 | **EG4S20BG256 芯片内部**（片内 SDRAM 硬宏），不占 FPGA 引脚，因此板级管脚表/原理图里查不到 |
+| 容量/组织 | `EG_PHY_SDRAM_2M_32`：2M×32 bit = **8 MB / 64 Mbit**，32 bit 数据，4 bank，11 位地址 |
+| 怎么用 | TD IP：`SDRAM PHY`（`EG_PHY_SDRAM`，device=EG4S20BG256）；例程 `01-board_test\src\5640\sdram_ctrl_4p\` 已给出完整控制器 + 两个 FIFO |
 
-证据链：
-1. 【管脚表】全表 194 行没有任何 `SDRAM_*` / `DQM` / `BA` / `RAS` / `CAS` 信号；存储器只有「板载SRAM」一组（第 9–48 行）。
-2. 【IO.adc】无任何 SDRAM 引脚约束。
-3. 【底板图】8 个 `.SchDoc` 与 `PcbDoc` 二进制里 **搜不到** `W9825 / HY57 / MT48 / K4S / AS4C / EM63 / HYNIX` 等 SDRAM 料号；【核图】第 3 页只有 SRAM(U2) 与 SPI Flash(U3)。
-4. `01-board_test\src\5640\` 里的 `Sdram_Control_4Port` / `sdram_ip.v` 确实被 `ov5640_sdram_vga.v` 例化，但其 `dq/addr/ba/ras_n...` **只连到模块内部 wire**，`ov5640_sdram_vga` 的端口列表里没有 SDRAM 引脚，顶层也没约束 → 综合后无对应管脚。
-5. 该 IP 是 `EG_PHY_SDRAM_2M_32`（**2M×32 = 64 Mb = 8 MB，32 bit，4 bank，11 位地址**），文件头写着 `F:/voiue/ac201/ov5640_sdram_hdmi_tft/rtl/...`、2020-03-29、TD 4.5 —— 明显是别的板（带 SDRAM 的旧 AC201/MINI 板）的工程拷过来的。
+证据：
+1. 官方《2026 全国大学生嵌入式芯片与系统设计竞赛 FPGA 赛道选题指南（安路）》推荐平台 1：`EG4S20BG256 … 片内集成 SDRAM：2Mx32bit`（[指南 PDF](anlogic_2026_guide.pdf)）。
+2. 安路官网 SALEAGLE 4 系列："部分器件内置 64M bit SDR SDRAM"（[产品页](https://www.anlogic.com/product/fpga/saleagle)）。
+3. `sdram_ip.v` 端口为 `clk/ras_n/cas_n/we_n/addr[10:0]/ba[1:0]/dq[31:0]/cs_n/dm0-3/cke`——`IO.adc` 里没有这些引脚，正说明它们连的是**片内**宏。
+4. 板级 BOM/原理图确实没有 SDRAM 颗粒（第 1 版据此误判为"没有 SDRAM"，教训：片内资源不会出现在板级资料里）。
 
-> 若日后要加 SDRAM 帧缓存：本板没有预留 SDRAM 位号/走线，只能外挂模块走 GPIO 排针（GPIO0 36 根 / GPIO2 28 根，3.3 V LVCMOS，速率有限）。
+> 用法注意：`Sdram_Control_4Port` 只能**顺序流式**访问（每端口有内部地址计数器），没有逐字随机口；对 640×480 帧缓存足够，但做"解码块序→显示行序"需要额外行缓存重排。
 
 ### 4.2 SRAM（`03-SRAM` 例程用的那颗）—— **512 KB**
 
@@ -206,18 +212,18 @@
 
 ## 9. 对本项目（TF→JPEG→帧缓存→HDMI 640×480）的直接影响
 
-### 9.1 帧缓存容量（硬约束）
+### 9.1 帧缓存容量（已更正：用片内 8 MB SDRAM）
 
-| 方案 | 需求 | 512 KB SRAM 是否够 |
+帧缓存放**片内 8 MB SDRAM**（2M×32），不再受 512 KB SRAM 限制：
+
+| 方案 | 单页需求 | 8 MB 余量 |
 | --- | --- | --- |
-| 640×480 RGB565 (16 bpp) | 614 400 B = **600 KB** | ❌ 差 90 KB |
-| 640×480 RGB444 (12 bpp) | 460 800 B = 450 KB | ✅ 余 74 KB |
-| 640×480 8 bpp 调色板 | 307 200 B = 300 KB | ✅ 余 224 KB（可双缓冲） |
-| 640×360 RGB565 | 460 800 B = 450 KB | ✅ |
-| 512×384 RGB565 | 393 216 B = 384 KB | ✅ |
-| 片内 BRAM 做帧缓存 | 仅 ≈136 KB | 只够 2–4 行行缓存 |
+| 640×480 RGB888 (24 bpp) | 921 600 B ≈ **900 KB** | 可放 2 页（双缓冲）+ 余量 |
+| 640×480 RGB565 (16 bpp) | 614 400 B = **600 KB** | 可放 2–3 页 |
+| 640×480 RGB444 (12 bpp) | 460 800 B = 450 KB | 充裕 |
+| 640×480 8 bpp | 307 200 B = 300 KB | 充裕 |
 
-→ **16 bpp 全帧单缓冲都放不下，更不用说双缓冲。** 要么降色深/分辨率，要么改变"整帧缓存"的架构（例如条带化：解码 N 行→显示 N 行，用 SRAM 做 2–4 条带乒乓）。
+→ 原第 1 版"16 bpp 单缓冲都放不下"的结论作废。**512 KB 外部 SRAM** 仍有用：可放 2 个 64 KB 压缩帧槽（正好对应参考图 2 的"两个 64 KiB 压缩帧槽"），或做解码条带缓存。
 
 ### 9.2 SRAM 带宽（推算，待实测）
 

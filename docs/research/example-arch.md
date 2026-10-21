@@ -5,7 +5,7 @@
 > **B** = `...\02-uart_sd_rw串口读写SD卡\AC201_AL_uart_sd_rw\`
 > 目标：TF 卡读 JPEG/PCM → 硬件 JPEG 解码 → SDRAM → HDMI 640×480（含音频）。本文只回答"官方例程里已经有什么能复用"。
 
-> ⚠️ **更正（2026-10-21）**：本文初稿把 `EG_PHY_SDRAM_2M_32` 误判为"片内 SDRAM 硬宏"。核对 `sdram_ip.v` 端口后确认：它是**外置 SDRAM 颗粒的引脚级 PHY**（ras/cas/we/addr/ba/dq/dm/cke 全是片外信号）。**本板没有 SDRAM 颗粒**（`IO.adc` 无 SDRAM 引脚约束，`board_test` 里这条链是从带 SDRAM 的旧板工程 `ov5640_sdram_hdmi_tft` 拷来的死代码）。因此下文 §0 表、§3、§8、§9 中"SDRAM 可做帧缓存"的结论作废：帧缓存只能落在 **512 KB 异步 SRAM** 上，详见 [hw-facts.md](hw-facts.md) §4.1–4.2、§9.1。
+> ⚠️ **更正（2026-10-21，第二次）**：`EG_PHY_SDRAM_2M_32` **确实是 EG4S20 芯片内部的 SDRAM 硬宏**，可用；本文初稿的"片内硬宏"是对的，我中途改成"外置 PHY"是错的。证据：① 官方《2026 全国大学生嵌入式芯片与系统设计竞赛 FPGA 赛道选题指南（安路）》推荐平台 1：`EG4S20BG256 … 片内集成 SDRAM：2Mx32bit`（[指南 PDF](anlogic_2026_guide.pdf)）；② 安路官网 SALEAGLE 4 系列："部分器件内置 64M bit SDR SDRAM"（[产品页](https://www.anlogic.com/product/fpga/saleagle)）；③ `sdram_ip.v` 的 `ras/cas/we/addr/ba/dq/dm/cke` 是**内部**信号，所以 `IO.adc` 里没有 SDRAM 引脚——这正是"不占引脚"的原因，不是"板上没有"。**结论：帧缓存用片内 8 MB SDRAM，512 KB 外部 SRAM 不必承担整帧缓存。**
 
 ---
 
@@ -15,7 +15,7 @@
 |---|---|---|
 | HDMI 1.4b 发送核心（加密） | A:`src/user_source/hdl_source/hdmi1.4b_transmitter_core/hdmi_1_4b_transmitter_core_wrapper.enc.v` | **可原样复用**，仅改参数（时序/HACTIVE/VIC）+ 重配 PLL |
 | TMDS 串行化（ODDR） | A:`src/user_source/hdl_source/lane_lvds_10_1.v`、`hdmi_phy_warpper.v` | **可原样复用** |
-| SDRAM 控制器 + SDRAM 宏 | A:`src/5640/sdram_ctrl_4p/*` | ⚠️ **见文首更正：本板无 SDRAM，此链不可用**；控制器本身只能顺序流式读写 |
+| SDRAM 控制器 + 片内 SDRAM 宏 | A:`src/5640/sdram_ctrl_4p/*` | **可原样复用**：`EG_PHY_SDRAM_2M_32` 是 EG4S20 内部 2M×32=8 MB SDRAM 硬宏，不占引脚；但只能顺序流式读写（无随机寻址） |
 | 显示时序发生器 | A:`src/5640/vga/disp_driver.v` + `disp_parameter_cfg.v` | **时序参数可抄**（内含 640×480 表），模块本身是并口 TFT 用 |
 | ACR（HDMI 音频时钟再生） | A:`src/user_source/hdl_source/audio_arc_calculate.v` | **可原样复用** |
 | I2S 接收 | A:`src/user_source/hdl_source/I2S_receiver.v` | 可用（若音频源是 I2S）；播放需自己写 I2S 发送 |
@@ -121,7 +121,7 @@ INIT_PER 24000, REF_PER 1024, SC_CL 3, SC_RCD 3, SC_RRD 7, SC_PM 1(页模式), S
 - **4 个端口**：WR1、WR2（写，`[31:0]` 数据，`[20:0]` 起止地址，9 bit 突发长度，独立写时钟 `WRx_CLK`）与 RD1、RD2（读，同构，`RDx_CLK`）。每端口另有 `FULL/EMPTY`。
 - **FIFO 深度 512×32**：`Sdram_WR_FIFO.ipc`（`aef=127, aff=378`）、`Sdram_RD_FIFO.ipc`（`aff=128`），对应资源 7 个 `fifo9k`。
 - **时钟**：控制器内部自己产生（`Sdram_Control_4Port.v:259-265`）`Sdram_PLL` → `CLK = 100 MHz`（控制器主时钟）、`SDR_CLK = 100 MHz / 270°`（送 SDRAM）；参考时钟是端口 `REF_CLK`（例程接 50 MHz）。注意 `CLK` 在端口表里是 **`output wire`（第 253 行）**，所以 `ov5640_sdram_vga.v:134` 的 `.CLK(clk_w)` 是把它接到一根未声明的隐式线网——**无害但是个坑**（容易误以为是输入时钟）。
-- ⚠️ **本文初稿误称"片内 SDRAM 硬宏"，已更正**：`sdram_ip.v` 例化的是 `EG_PHY_SDRAM_2M_32`，端口为 `ras_n/cas_n/we_n/addr[10:0]/ba[1:0]/dq[31:0]/cs_n/dm0-3/cke`——这是**外置 SDRAM 颗粒的引脚级 PHY**，不是片内宏。本板没有 SDRAM 颗粒，`IO.adc` 也无任何 SDRAM 引脚约束，`ov5640_sdram_vga` 的 SDRAM 信号只连内部 wire，综合后该层次资源为 0。所以这条链在本板**不可用**（详见 [hw-facts.md](hw-facts.md) §4.1）。
+- **SDRAM 是 EG4S20 片内硬宏，不占引脚**（这一点经官方选题指南与安路产品页确认，见文首更正）：`sdram_ip.v` → `EG_PHY_SDRAM_2M_32`（2M×32 = **8 MB / 64 Mbit**）。`IO.adc` 里没有任何 SDRAM 引脚，正是因为它集成在芯片内部；综合后 `sdram_ip` 层次资源报 0 是因为 `ov5640_sdram_vga` 顶层没用到它的端口（该子模块在 AC208 板测里未接入），**不代表不可用**。
 - 容量核对：2^21 × 4 B = 8 MB，与 `ASIZE=21` 一致。
 
 ### 3.2 怎么例化（可直接照抄的用法）
@@ -295,7 +295,7 @@ output idle, done;
 **可原样复用（改参数/改引脚即可）**
 1. `hdmi_1_4b_transmitter_core_wrapper.enc.v` + `hdmi_phy_warpper.v` + `lane_lvds_10_1.v` → HDMI 640×480 输出（改 10 个时序参数 + `VIDEO_TPG="Disable"` + `VIDEO_VIC=1`）。
 2. `audio_arc_calculate.v`（ACR）——像素时钟变了也不用改。
-3. ~~`Sdram_Control_4Port` + `sdram_ip` + 两个 FIFO IP（8 MB 帧缓存）~~ —— **本板无 SDRAM，不可用**；帧缓存只能落在 512 KB 异步 SRAM 上（见 [hw-facts.md](hw-facts.md) §4.2、§9.1）。
+3. `Sdram_Control_4Port` + `sdram_ip` + 两个 FIFO IP（片内 8 MB SDRAM，做帧缓存）。
 4. `disp_parameter_cfg.v` 里 640×480 的时序常数（`H_Total 800 / H_Sync 96 / HBP 40 / HFP 8 / V_Total 525 / VSA 2 / VBP 25 / VFP 2`，像素时钟 25.175 MHz）——即使最终走 HDMI，也可直接抄这套数字。
 5. `function_pin.v`（共用 I²C 分时）、`key_remove_shakes.v`、`i2s_init_dev/i2s_control/i2s_bit_shift` 框架。
 6. B 工程的 SD 扇区引擎（`sd_card_control` 及其子模块）。
@@ -317,6 +317,6 @@ output idle, done;
 
 ## 9. 摘要
 
-两套官方例程可原样复用的有四条链：① HDMI 发射链——加密核心 `hdmi_1_4b_transmitter_core_wrapper.enc.v` 在 TD 6.2.2 下即可编译、无需额外 license，改十个时序参数就从 720p 降到 640×480，TMDS 由 `lane_lvds_10_1` 的 ODDR 原语串行化；ACR 模块 `audio_arc_calculate.v` 与像素时钟无关，可照用。② 帧缓存——`Sdram_Control_4Port` 面向 8 MB **外置** SDRAM（本板没有，不可用；帧缓存只能做在 512 KB SRAM 上）。③ SD 卡——SPI Mode 3、25 MHz、CMD17/CMD24 单扇区，可整段搬用，上限约 3 MB/s。④ WM8960 的 I2C 初始化框架与 640×480 时序常数。
+两套官方例程可原样复用的有四条链：① HDMI 发射链——加密核心 `hdmi_1_4b_transmitter_core_wrapper.enc.v` 在 TD 6.2.2 下即可编译、无需额外 license，改十个时序参数就从 720p 降到 640×480，TMDS 由 `lane_lvds_10_1` 的 ODDR 原语串行化；ACR 模块 `audio_arc_calculate.v` 与像素时钟无关，可照用。② 帧缓存——`Sdram_Control_4Port` 驱动 EG4S20 **片内** 8 MB SDRAM 硬宏，4 端口／32 位／100 MHz，但只能顺序寻址，读写共用区间会撕裂。③ SD 卡——SPI Mode 3、25 MHz、CMD17/CMD24 单扇区，可整段搬用，上限约 3 MB/s。④ WM8960 的 I2C 初始化框架与 640×480 时序常数。
 
 必须自写：JPEG 解码器（例程只有 OV5640 的 JPEG 编码配置）、FAT32 与多扇区流式读、640×480 AXIS 视频源（现 `VIDEO_TPG=Enable`，`video_source_test` 综合后仅剩 1 个 LUT，画面其实是核心内置图案）、SDRAM 写侧的块→行重排与双缓冲、I2S 发送（`i2s_tx` 被注释）。硬约束：PLL 已 4/4 用满、BRAM 已 45%、36 位 `gpio_40pin` 纯占 IO 应删。待实测：WM8960 地址 `0x20` 疑为 `0x34`、音频 LRCK 的 `A7/A8` 冲突、8.197 MHz MCLK 实为 32 kHz。

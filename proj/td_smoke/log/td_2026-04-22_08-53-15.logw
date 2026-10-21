@@ -1,0 +1,3 @@
+HDL-5007 WARNING: could not find top-level module/unit; aborting hierarchy tree creation
+HDL-8007 ERROR: cannot find port 'clk_out1' on this module in rtl/top.v(41)
+HDL-8007 ERROR: cannot find port 'clk_in1' on this module in rtl/top.v(43)
