@@ -1,0 +1,38 @@
+# ---- 安路 TangDynasty (TD) 编译/综合产物（不进仓库，可本地重新生成）----
+db/
+outflow/
+*_Runs/
+*.bit
+*.bin
+*.rpt
+*.log
+*.fdb
+*.ipc
+*.dpc
+*.sdf
+*.vcd
+*.wlf
+*.fsdb
+*.pin
+*.pad
+*.prn
+*.sar
+*.tdc
+*.bak
+
+# ---- 保留：工程/约束源文件 ----
+# *.al  工程文件  *.adc 引脚约束  *.sdc 时序约束  *.v 源码 —— 都要提交
+
+# ---- 通用 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# ---- Office 临时文件 ----
+~$*.docx
+~$*.xlsx
+~$*.pptx
