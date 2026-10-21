@@ -36,3 +36,6 @@ desktop.ini
 ~$*.docx
 ~$*.xlsx
 ~$*.pptx
+
+# ---- 本地测试/构建副本（TD 冒烟测试等，不入库）----
+proj/td_smoke/
