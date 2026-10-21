@@ -39,3 +39,10 @@ desktop.ini
 
 # ---- 本地测试/构建副本（TD 冒烟测试等，不入库）----
 proj/td_smoke/
+
+# ---- TD GUI 会话日志 / 仿真临时产物 ----
+log/
+proj/*/log/
+sim/_tmp/
+__pycache__/
+*.pyc
