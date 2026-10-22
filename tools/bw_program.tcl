@@ -33,9 +33,18 @@ puts "cable : $cable"
 puts "--- list_cable ---"
 if {[catch {list_cable} e]} { puts "FAIL list_cable: $e"; exit 3 }
 
-puts "--- read_device_id ---"
-if {[catch {read_device_id} id]} { puts "FAIL read_device_id: $e" ; }
-if {[info exists id]} { puts "device: $id" }
+puts "--- wait for the cable (read_device_id retries) ---"
+set tries 0
+while {1} {
+    incr tries
+    if {![catch {read_device_id} id]} {
+        puts "device: $id"
+        break
+    }
+    puts "  no device yet (attempt $tries) - check the AL-LINK USB cable, close BitWriter GUI"
+    if {$tries >= 5} { puts "FAIL: cable not visible after $tries tries"; exit 4 }
+    after 2000
+}
 
 puts "--- download ---"
 set rc [catch {
