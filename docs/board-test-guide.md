@@ -3,15 +3,64 @@
 > 给板子接线、烧录、看现象、排查用的操作手册。工程代码在 `proj/m*/`，每个里程碑都有独立 .bit。
 > 环境：安路 TangDynasty **TD 2026.1 SP2**（装在 `E:\`），license `E:\license\Anlogic.lic`（有效至 2026-11-22）。
 
-## 1. 接线与烧录
+## 1. 接线、烧录（第一次上板按这个顺序做）
 
-1. 板子接 **5V 电源**、**USB 下载线**（板载下载器或 AL-LINK 均可）、**HDMI 显示器**（你那台 1024×600 的就行，640×480 会被显示器放大）。
-2. 打开 TD → `File → Open Project` 选对应工程的 `.al`（如 `proj\m0_hdmi\m0_hdmi.al`）。
-3. 工具栏点 **下载 / Program Device**，选该工程 `*_Runs\phy_1\*.bit`，下载。
-4. 下载完成后**不需要任何操作**：配置一结束 PLL 就锁定并自动释放复位，设计自己开始跑（M0 立即出彩条；M2 起约 0.5 s 出第一张图）。
-   按 **KEY2**（H14，复位，低有效）= 重新上电，换了卡/换了图之后按它重读一遍。
+### 1.1 硬件怎么接
 
-> 如果找不到下载按钮：TD 里也可以 `Tools → Download`，或直接用独立的下载工具选 .bit。搞不定就把界面截图发我。
+| 项 | 怎么接 |
+|---|---|
+| 电源 | AC208 底板 DC 电源座 J3 + 电源开关（SS-13F24）；板上 DC-DC 出 5 V / 3.3 V / 2.5 V / 1.5 V，上电后电源灯亮 |
+| 下载器 | **AL-LINK**（USB Type-B 线接电脑 + 10 针排线接底板 JTAG 的 IDC 2×5 座）；排线**红线对 1 脚**（座子方焊盘那一端） |
+| HDMI | 底板 HDMI 输出 → 显示器（板上无 DDC/EDID，显示器要能盲锁 640×480@60，1024×600 的也能放大显示） |
+| TF 卡 | M2 起需要：FAT32 + 根目录 `IMGnnnn.BMP`（见 §3） |
+| 耳机 | M4 需要：3.5 mm 绿色耳机口 |
+
+JTAG 信号（查线/量通断用）：**TCK=C14、TDI=C12、TDO=E14、TMS=A15**。
+板子**没有板载下载器**；那个 USB-C（CH340E）只是 UART 串口，不能烧录。
+
+### 1.2 装驱动（只做一次）
+
+首次把 AL-LINK 插上电脑：设备管理器 →「其它设备」里会出现带感叹号的 **AL-LINK**。
+右键 → 更新驱动程序 → 浏览到 **`E:\driver\al-link\win10\x64`**（Win11 用这个；老系统用 `win7`）→ 装好后设备管理器里不再有感叹号。
+（老款下载线用 `E:\driver\dl-cable\`；Linux 免驱，只需给 USB 设备权限。）
+
+### 1.3 连接检查（每次开工先做）
+
+1. 板子上电（开关 ON），AL-LINK 插好 USB。
+2. 打开下载工具：TD 里 **`Tools → BitWriter`**（或工具栏 BitWriter 按钮），**也可以直接双击 `E:\bin\bw.exe` 独立启动**——不打开工程也能烧。
+3. 在「器件/下载器信息栏」点 **Refresh**：`Debug Server` 显示 **AL-LINK**、器件型号读出 **EG4S20BG256**，说明链路通。
+4. 读不到就依次查：USB 线/驱动、板子是否上电、10 针排线方向（红线对 1 脚）、JTAG 座是否插偏。
+
+### 1.4 下载到 SRAM（调试用，掉电丢失，最常用）
+
+1. 工具栏 **Add** → 选 `.bit`（本仓库的 bit 都在各工程 `*_Runs\phy_1\` 下，不是 best_result），在列表里**选中**它。
+2. 下载模式选 **Program SRAM**；TCK 速率默认 **5 MHz**（读不稳就降到 2 MHz / 500 kHz）。
+3. 点 **Run**，进度到 100% 即完成。
+4. 设计**自动开始运行，不用按键**：M0 立即出彩条；M2 起约 0.5 s 出图。没反应按 KEY2 复位一次。
+5. 换下一个里程碑的 bit：重复 1–3 即可（不用断电、不用重开 TD）。
+
+### 1.5 固化到 Flash（演示用，掉电保持）
+
+1. 先看核心板上配置 Flash（**U3**，8 脚 SPI Flash）**是否已贴片**、记下丝印型号（W25Q 系列等）。
+2. 同 1.4 选文件，下载模式改 **Program Flash**，点 **Run**（写整片 + 校验，要十几秒到几十秒）。
+3. 断电 → 重新上电 → **不接下载线**也应自动跑。
+4. 想擦掉：**Erase Flash**（整片擦除），或再 Program Flash 烧别的版本。
+5. ⚠️ 固化会覆盖板子出厂例程。官方预编译 bit 有备份，随时能烧回去：
+   `...\01-board_test基础自检\AC201_AL_board_test\AC201_AL_board_test_Runs\best_result\AC201_AL_board_test.bit`
+6. 如果 U3 是空贴 / 型号不在支持列表：Program Flash 会报读 Flash ID 错误（PRG-9516）。那就放弃固化，
+   每次上电用 Program SRAM 烧一次——下载线一直插着，演示也能接受。
+
+### 1.6 下载常见报错
+
+| 报错 | 含义 | 处理 |
+|---|---|---|
+| `PRG-9505 USB device open error` | 电脑没看到下载器 | 插好 AL-LINK、装驱动、换 USB 口 |
+| `PRG-9511 打开下载器失败` | 下载器被占用/连接不稳 | 关掉其它 TD / Debug 会话，重插 |
+| `PRG-9525 器件 ID 不在库` | 链路上读不到正确 ID | 板子没上电、排线插反/没插、器件选错 |
+| `PRG-9516 读 Flash ID 错误` | Flash 不在位或型号不支持 | 确认 U3 贴片；改用 Program SRAM |
+| `GUI-8701 下载位流失败` | 码流/链路问题 | 降 TCK、重插 USB、重启 BitWriter |
+
+> TD 新版把老「Download」工具改名为 **BitWriter**（老文档里还叫 Download）；命令行版是 `E:\bin\bw_commands_prompt.exe`（可脚本化，见 §8）。
 
 ## 2. 各里程碑与期望现象
 
@@ -97,3 +146,14 @@ M4 工程上电后应自动播放 **1 kHz 正弦测试音**，从板载 3.5 mm �
 cd E:\fpga-2026\dsh_code\proj\m0_hdmi
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
+
+## 8. 命令行烧录（可选，bw Tcl）
+
+TD 的下载器也能不开 GUI、用 Tcl 驱动：`E:\bin\bw_commands_prompt.exe <脚本.tcl>`。
+已验证可用的命令（本机未接下载器时探测）：
+
+* `list_cable` —— 列出下载器，没接线时正常返回空；
+* `connect_cable`、`program`、`read_device_id` —— 没接线时报 `PRG-9505 USB device open error`（说明命令确实在找下载器）；
+* 还有 `program_spi`、`program_spibin`、`verify_spi`、`erase_spi`、`get_flash_manufacturer`、`export_program_log` 等。
+
+等第一次接上 AL-LINK，我再把「一条命令烧某一个里程碑 + 打印结果」的脚本（`tools/bw_program.tcl` + `flash.ps1`）写好并验证参数；以后改一版 RTL 就能一条命令上板，不用点 GUI。
