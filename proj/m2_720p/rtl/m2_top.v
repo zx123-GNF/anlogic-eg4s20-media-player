@@ -1,4 +1,4 @@
-﻿//=============================================================================
+//=============================================================================
 //  m2_top.v  --  M2 milestone : TF card (SPI) -> FAT32 -> 640x480 24 bit BMP
 //                 -> SDRAM page B -> page swap -> HDMI
 //
@@ -82,6 +82,16 @@ module m2_top (
     localparam [20:0] PAGE_B_BASE = 21'h04B000;     //  307200 W, 0x12C000 B
     localparam [20:0] PAGE_A_END  = 21'h04B000;     //  307200 words
     localparam [20:0] PAGE_END    = 21'h096000;     //  614400 words
+
+    //  A page is one 640x480 image -- NOT the 1280x720 output canvas.  The page
+    //  writer derives its row length (HACTIVE), row count (VACTIVE) and the
+    //  hard-coded row stride (row*640) from these, and the BMP loader / test
+    //  pattern produce exactly 640*480 words.  Feeding it the canvas geometry
+    //  makes it wait for 1280*720 = 921600 pixels that never arrive, so the
+    //  pattern path deadlocks in S_PAT_E while the writer waits in W_ROW:
+    //  O_busy stays high, the page never swaps, the screen stays black.
+    localparam PAGE_W = 640;
+    localparam PAGE_H = 480;
 
     //-------------------------------------------------------------------------
     // clocks / resets
@@ -298,8 +308,8 @@ module m2_top (
     wire        S_wr_page, S_wr_bup, S_wr_flush, S_wr_done, S_wr_busy;
 
     m2_page_wr #(
-        .HACTIVE (HACTIVE),
-        .VACTIVE (VACTIVE)
+        .HACTIVE (PAGE_W),          // frame buffer geometry, not the canvas
+        .VACTIVE (PAGE_H)
     ) u_wr (
         .I_clk         (S_sdram_clk),
         .I_rst         (S_rst_sdram),
