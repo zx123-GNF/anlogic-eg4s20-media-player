@@ -95,7 +95,20 @@ module m2_byte_seq (
                 end
 
                 S_PRE: begin
-                    S_st <= S_RUN;
+                    // The sector buffer RAM registers its output, so the byte
+                    // seen at cycle t is mem[addr(t-1)].  O_addr was loaded
+                    // with I_off in S_IDLE, which makes the first sample
+                    // correct, but the address must ALSO advance during this
+                    // cycle: otherwise every following sample reads one byte
+                    // too early, i.e. V[1] = mem[I_off] again and the whole
+                    // sequence is shifted by one.
+                    //
+                    // Bench symptom (UART dump of the MBR signature read at
+                    // offset 510):  payload = 55 55 instead of 55 AA, the FAT
+                    // partition entry was read one byte off and the BMP header
+                    // would have been too.
+                    O_addr <= O_addr + 9'd1;
+                    S_st   <= S_RUN;
                 end
 
                 S_RUN: begin

@@ -92,7 +92,9 @@ module m2_fat_bmp #(
     output reg  [2:0]   O_err,
     output wire [4:0]   O_count,
     output reg  [4:0]   O_index,
-    output wire         O_buf_sel      // 1 = the pixel pump owns the buffer port
+    output wire         O_buf_sel,     // 1 = the pixel pump owns the buffer port
+    output wire [5:0]   O_dbg_st,      // debug: current FSM state (UART dumper)
+    output wire [7:0]   O_dbg_ck       // debug: BPB checks {spc,rsvd,nfat,root,fatsz32,bps}
 );
 
     localparam [31:0] PIX_BYTES = 32'd921600;       // 640*480*3 = 0x0E1000
@@ -148,6 +150,7 @@ module m2_fat_bmp #(
     localparam S_PAT    = 6'd44;
     localparam S_PAT_E  = 6'd45;
     localparam S_ERR    = 6'd46;
+localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
 
     //-------------------------------------------------------------------------
     // registers
@@ -156,6 +159,15 @@ module m2_fat_bmp #(
     reg [5:0]  S_rd_ret, S_bs_ret, S_wr_ret;
 
     reg [31:0] S_part_lba, S_fat_lba, S_data_lba, S_fatsz, S_root_clus;
+
+    // BPB read #1 fields, latched in S_BF1_C (B[] only holds one read)
+    reg [15:0] Q_bps;
+    reg [7:0]  Q_spc;
+    reg [15:0] Q_rsvd;
+    reg [7:0]  Q_nfat;
+    wire Q_spc_ok = (Q_spc != 8'd0) &&
+                    ((Q_spc & (Q_spc - 8'd1)) == 8'd0) &&
+                    (Q_spc <= 8'd128);
     reg [7:0]  S_spc;
     reg [3:0]  S_log2spc;
 
@@ -235,8 +247,14 @@ module m2_fat_bmp #(
     wire [15:0] W_rsvd    = {B[4],  B[3]};                     // RsvdSecCnt  14,15
     wire [7:0]  W_nfat    = B[5];                              // NumFATs     16
 
-    // BPB fields, read #2 (off 32, 16 bytes)
-    wire [15:0] W_fatsz16 = {B[1],  B[0]};                     // FATSz16    32,33
+    // BPB fields, read #2 (off 32, 16 bytes): TotSec32, FATSz32, ExtFlags,
+    // FSVer, RootClus.  FATSz16 lives at offset 22 and is NOT part of this
+    // read; an earlier version checked "FATSz16 == 0" against B[1:0] here,
+    // which is really TotSec32[15:0], so every card bigger than 32768 sectors
+    // (i.e. every real card) failed the BPB sanity check with error 2.
+    // FAT32 is still detected reliably: FATSz32 != 0 while TotSec32 != 0 and
+    // RootClus >= 2 is exactly what a FAT32 BPB looks like.
+    wire [15:0] W_totsec32_lo = {B[1], B[0]};                  // TotSec32    32,33
     wire [31:0] W_fatsz32 = {B[7],  B[6],  B[5],  B[4]};       // FATSz32    36..39
     wire [31:0] W_rootc   = {B[15], B[14], B[13], B[12]};      // RootClus   44..47
 
@@ -450,6 +468,11 @@ module m2_fat_bmp #(
                             : {S_px[9:2], S_py[8:1], 8'h40};
 
     assign O_buf_sel   = (S_st == S_DSEC_W) || (S_st == S_PP_W);
+    assign O_dbg_st    = S_st;
+    assign O_dbg_ck    = {2'b00, Q_spc_ok, (Q_rsvd != 16'd0),
+                          (Q_nfat >= 8'd1) && (Q_nfat <= 8'd2),
+                          (W_rootc >= 32'd2), (W_fatsz32 != 32'd0),
+                          (Q_bps == 16'd512)};
 
     assign O_pix_valid = (S_st == S_PAT) ? 1'b1 : I_pp_pix_valid;
     assign O_pix_data  = (S_st == S_PAT) ? W_pat_col : I_pp_pix_data;
@@ -464,6 +487,10 @@ module m2_fat_bmp #(
             S_bs_ret       <= S_POR;
             S_wr_ret       <= S_POR;
             S_part_lba     <= 32'd0;
+            Q_bps          <= 16'd0;
+            Q_spc          <= 8'd0;
+            Q_rsvd         <= 16'd0;
+            Q_nfat         <= 8'd0;
             S_fat_lba      <= 32'd0;
             S_data_lba     <= 32'd0;
             S_fatsz        <= 32'd0;
@@ -586,11 +613,26 @@ module m2_fat_bmp #(
             end
 
             S_MBR_W: begin
-                S_pent   <= 4'd0;
-                O_bs_off <= 9'd82;                 // "FAT32" file system type
-                O_bs_cnt <= 6'd8;
-                S_bs_ret <= S_FS_C;
+                // DEBUG: first make sure the sector we read is really LBA 0 by
+                // checking the 0x55 0xAA boot signature at offset 510.  A wrong
+                // clock phase / buffer address shows up here as garbage.
+                O_bs_off <= 9'd510;
+                O_bs_cnt <= 6'd2;
+                S_bs_ret <= S_SIG_C;
                 S_st     <= S_BS1;
+            end
+
+            S_SIG_C: begin
+                if ((B[0] == 8'h55) && (B[1] == 8'hAA)) begin
+                    S_pent   <= 4'd0;
+                    O_bs_off <= 9'd82;             // "FAT32" file system type
+                    O_bs_cnt <= 6'd8;
+                    S_bs_ret <= S_FS_C;
+                    S_st     <= S_BS1;
+                end else begin
+                    O_err <= 3'd5;                 // DEBUG: MBR data not valid
+                    S_st  <= S_ERR;
+                end
             end
 
             S_FS_C: begin
@@ -612,7 +654,7 @@ module m2_fat_bmp #(
                     S_part_lba <= {B[11], B[10], B[9], B[8]};
                     S_st       <= S_BPB;
                 end else if (S_pent == 4'd3) begin
-                    O_err <= 3'd2;
+                    O_err <= 3'd7;                     // DEBUG: partition table rejected
                     S_st  <= S_ERR;
                 end else begin
                     S_pent   <= S_pent + 4'd1;
@@ -637,6 +679,18 @@ module m2_fat_bmp #(
             end
 
             S_BF1_C: begin
+                // B[] is a single 34 byte window over the sector buffer, so the
+                // four fields of read #1 (offset 11) must be latched NOW: by
+                // the time S_BF2_C runs, B[] only holds read #2 (offset 32).
+                // Without this latch the BPB check compared BytsPerSec,
+                // SecPerClus, RsvdSecCnt and NumFATs against the TotSec32 /
+                // FATSz32 / RootClus bytes, so it failed on every real card
+                // (error 2) -- confirmed with the debug UART: the check bitmap
+                // read 0x16, i.e. only the three read#2 conditions passed.
+                Q_bps    <= W_bps;
+                Q_spc    <= W_spc_new;
+                Q_rsvd   <= W_rsvd;
+                Q_nfat   <= W_nfat;
                 O_bs_off <= 9'd32;
                 O_bs_cnt <= 6'd16;
                 S_bs_ret <= S_BF2_C;
@@ -644,17 +698,18 @@ module m2_fat_bmp #(
             end
 
             S_BF2_C: begin
-                if ((W_bps == 16'd512) && (W_fatsz16 == 16'd0) &&
-                    (W_fatsz32 != 32'd0) && (W_rootc >= 32'd2) &&
-                    (W_nfat >= 8'd1) && (W_nfat <= 8'd2) &&
-                    (W_rsvd != 16'd0) && W_spc_ok) begin
+                if ((Q_bps == 16'd512) &&
+                    (W_fatsz32 != 32'd0) &&
+                    (W_rootc >= 32'd2) &&
+                    (Q_nfat >= 8'd1) && (Q_nfat <= 8'd2) &&
+                    (Q_rsvd != 16'd0) && Q_spc_ok) begin
                     S_fatsz     <= W_fatsz32;
-                    S_spc       <= W_spc_new;
-                    S_log2spc   <= LOG2SPC(W_spc_new);
+                    S_spc       <= Q_spc;
+                    S_log2spc   <= LOG2SPC(Q_spc);
                     S_root_clus <= W_rootc;
-                    S_fat_lba   <= S_part_lba + {16'd0, W_rsvd};
-                    S_data_lba  <= S_part_lba + {16'd0, W_rsvd} +
-                                   ((W_nfat == 8'd2) ? {W_fatsz32[30:0], 1'b0}
+                    S_fat_lba   <= S_part_lba + {16'd0, Q_rsvd};
+                    S_data_lba  <= S_part_lba + {16'd0, Q_rsvd} +
+                                   ((Q_nfat == 8'd2) ? {W_fatsz32[30:0], 1'b0}
                                                      : W_fatsz32);
                     S_clus      <= W_rootc;
                     S_sec       <= 8'd0;

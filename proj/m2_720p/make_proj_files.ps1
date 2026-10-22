@@ -1,4 +1,4 @@
-﻿# generated helper: emit m2_720p.al / .prj / settings.cfg  (see build_files note)
+# generated helper: emit m2_720p.al / .prj / settings.cfg  (see build_files note)
 $ErrorActionPreference = 'Stop'
 $root = 'E:\fpga-2026\dsh_code\proj\m2_720p'
 $name = 'm2_720p'
@@ -40,6 +40,7 @@ $files = @(
  'rtl/hdmi_phy_warpper.v',
  'rtl/hdmi1.4b_transmitter_core/hdmi_1_4b_transmitter_core_wrapper.enc.v',
  'al_ip/pll_hdmi_720p/pll_hdmi_720p.v',
+ 'rtl/m2_dbg_uart.v',
  'rtl/m2_top.v'
 )
 

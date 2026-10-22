@@ -39,7 +39,15 @@
 //=============================================================================
 `timescale 1ns / 10ps
 
-module m2_top (
+module m2_top #(
+    //  0 = normal status LEDs
+    //  1 = DEBUG: led[2:0] = ~S_fat_err, i.e. the lights read as the FAT error
+    //      code in binary (lit = 1); led[3] off.  Codes: 1 = SD init failed,
+    //      2 = FAT32 BPB/dir failed, 3 = no IMGnnnn.BMP found, 4 = bad BMP
+    //      header, 5 = MBR signature 0x55AA missing (sector data is garbage),
+    //      6 = file smaller than 640x480, 7 = no FAT partition entry accepted.
+    parameter DEBUG_ERR = 1
+) (
     input  wire clk,            // 50 MHz, K14
     input  wire rst_n,          // KEY2, H14, low active
     input  wire key0_n,         // KEY0, F7, low active : next image
@@ -51,6 +59,8 @@ module m2_top (
     output wire SD_CS,          // R2
 
     output wire [3:0] led,      // M12 R16 R15 T15
+
+    output wire uart_tx,        // P2, CH340E debug UART (115200 8N1)
 
     output wire O_tmds_ch0_p,   // D11 / D12
     output wire O_tmds_ch1_p,   // C11 / A11
@@ -406,6 +416,8 @@ module m2_top (
     wire S_fat_mounted;
     wire [2:0] S_fat_err;
     wire [4:0] S_fat_count, S_fat_index;
+    wire [5:0] S_fat_st;
+    wire [7:0] S_fat_ck;
 
     m2_fat_bmp u_fat (
         .I_clk         (S_sdram_clk),
@@ -453,8 +465,34 @@ module m2_top (
         .O_err         (S_fat_err),
         .O_count       (S_fat_count),
         .O_index       (S_fat_index),
-        .O_buf_sel     (S_buf_sel)
+        .O_buf_sel     (S_buf_sel),
+        .O_dbg_st      (S_fat_st),
+        .O_dbg_ck      (S_fat_ck)
     );
+
+    //-------------------------------------------------------------------------
+    // debug UART dumper (CH340E on the baseboard, P2, 115200 8N1)
+    //   records the first 8 byte_seq reads (offset, count, FSM state, payload)
+    //   and prints them once, 0.5 s after reset at the latest.  See
+    //   m2_dbg_uart.v for the line format.
+    //-------------------------------------------------------------------------
+    wire S_dbg_tx;
+
+    m2_dbg_uart u_dbg (
+        .I_clk     (S_sdram_clk),
+        .I_rst     (S_rst_sdram),
+        .I_bs_done (S_bs_done),
+        .I_off     (S_bs_off),
+        .I_cnt     (S_bs_cnt),
+        .I_st      (S_fat_st),
+        .I_val     (S_bs_val),
+        .I_live_st (S_fat_st),
+        .I_live_err(S_fat_err),
+        .I_live_ck (S_fat_ck),
+        .O_uart_tx (S_dbg_tx)
+    );
+
+    assign uart_tx = S_dbg_tx;
 
     //-------------------------------------------------------------------------
     // status LEDs (100 MHz domain, no CDC needed for a status indication)
@@ -470,7 +508,7 @@ module m2_top (
         else
             S_led <= {S_disp_page, (S_fat_err != 3'd0), S_wr_busy, S_fat_mounted};
     end
-    assign led = S_led;
+    assign led = DEBUG_ERR ? {1'b1, ~S_fat_err} : S_led;
 
     //-------------------------------------------------------------------------
     // HDMI 1.4b transmitter core (encrypted IP, vendor supplied)

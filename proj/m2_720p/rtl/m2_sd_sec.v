@@ -51,8 +51,10 @@ module m2_sd_sec (
     localparam S_IDLE = 2'd0;
     localparam S_GO   = 2'd1;
     localparam S_RUN  = 2'd2;
+    localparam S_RST  = 2'd3;       // reset the vendor engine before every op
 
     reg [1:0]  S_st;
+    reg [2:0]  S_rcnt;
     reg        S_init_q;
     reg [31:0] S_lba_q;
     reg [28:0] S_wd;
@@ -87,8 +89,26 @@ module m2_sd_sec (
                         S_init_q <= I_init;
                         S_lba_q  <= I_lba;
                         S_wd     <= 29'd0;
-                        S_st     <= S_GO;
+                        S_rcnt   <= 3'd0;
+                        S_st     <= S_RST;
                     end
+                end
+
+                // The vendor engine must be reset before EVERY transaction.
+                // Its byte counter (cnt inside sd_read_data) is cleared only by
+                // rst, never by 'start', so from the second sector read on the
+                // bytes are written to wrapping addresses: the MBR read (the
+                // first one after reset) is correct, the BPB read back is
+                // garbage.  Bench symptom via the debug UART: MBR signature ok
+                // (55 AA), partition entry ok (type 0C, LBA 2048) but the BPB
+                // read at offset 11 returned 80 00 22 04 ... instead of 00 02.
+                S_RST: begin
+                    S_rst_sd <= 1'b1;
+                    if (S_rcnt == 3'd7) begin
+                        S_rst_sd <= 1'b0;
+                        S_st     <= S_GO;
+                    end else
+                        S_rcnt <= S_rcnt + 3'd1;
                 end
 
                 S_GO: begin
@@ -123,7 +143,13 @@ module m2_sd_sec (
     sd_card_control #(
         .clock_freq  (100_000_000),
         .spi_lowfreq (400_000),
-        .spi_highfreq(25_000_000)
+        //  5 MHz, not the vendor's 25 MHz: the vendor spi_driver samples MISO
+        //  from the 100 MHz system clock with no margin for the card's output
+        //  delay, so at 25 MHz (4 system clocks per bit) sector data comes back
+        //  corrupted while the 400 kHz init still works.  Bench symptom: the
+        //  MBR read "succeeds" but the partition entries are garbage (no FAT
+        //  type -> error 7).  ~1.5 s per 900 KB image is acceptable.
+        .spi_highfreq(5_000_000)
     ) u_sd (
         .mosi        (O_sd_mosi),
         .sclk        (O_sd_clk),
