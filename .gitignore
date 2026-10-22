@@ -46,3 +46,6 @@ proj/*/log/
 sim/_tmp/
 __pycache__/
 *.pyc
+
+# ---- 用户本地打包的 zip（不进仓库）----
+*.zip

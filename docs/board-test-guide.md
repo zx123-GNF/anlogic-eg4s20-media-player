@@ -18,11 +18,22 @@
 JTAG 信号（查线/量通断用）：**TCK=C14、TDI=C12、TDO=E14、TMS=A15**。
 板子**没有板载下载器**；那个 USB-C（CH340E）只是 UART 串口，不能烧录。
 
-### 1.2 装驱动（只做一次）
+### 1.2 装驱动（只做一次，本机已装好）
 
-首次把 AL-LINK 插上电脑：设备管理器 →「其它设备」里会出现带感叹号的 **AL-LINK**。
-右键 → 更新驱动程序 → 浏览到 **`E:\driver\al-link\win10\x64`**（Win11 用这个；老系统用 `win7`）→ 装好后设备管理器里不再有感叹号。
+AL-LINK 的 USB 驱动是 **Microsoft WHQL 签名**的（`E:\driver\al-link\win10\x64`），Win10/11 **不需要关驱动签名**。
+本机已装：设备管理器里是 **Anlogic AL-Link**（`USB\VID_336C&PID_1001`，驱动包 `oem59.inf`，服务 `ANLOCYUSB` Running）。
+
+换电脑/重装系统时，三选一：
+
+1. **脚本（推荐）**：管理员权限运行
+   `powershell -NoProfile -ExecutionPolicy Bypass -File E:\fpga-2026\dsh_code\tools\install_al_link_driver.ps1`
+   —— 会弹一次 UAC，点「是」；日志在 `tools\al-link-driver-install.log`。
+2. 设备管理器 → 带感叹号的 **EZ-USB FX2 / AL-LINK** → 更新驱动程序 → 浏览到 `E:\driver\al-link\win10\x64`。
+3. 命令行（管理员）：`pnputil /add-driver E:\driver\al-link\win10\x64\anlocyusb.inf /install`。
+
+装好的判据：设备管理器里是 **Anlogic AL-Link**、无感叹号（代码 28 表示还没装）。
 （老款下载线用 `E:\driver\dl-cable\`；Linux 免驱，只需给 USB 设备权限。）
+板子那个 USB-C（CH340E）只是 UART 串口，**烧板子不需要它**；只有想用串口调试才需要 CH341SER 驱动。
 
 ### 1.3 连接检查（每次开工先做）
 
@@ -30,6 +41,8 @@ JTAG 信号（查线/量通断用）：**TCK=C14、TDI=C12、TDO=E14、TMS=A15**
 2. 打开下载工具：TD 里 **`Tools → BitWriter`**（或工具栏 BitWriter 按钮），**也可以直接双击 `E:\bin\bw.exe` 独立启动**——不打开工程也能烧。
 3. 在「器件/下载器信息栏」点 **Refresh**：`Debug Server` 显示 **AL-LINK**、器件型号读出 **EG4S20BG256**，说明链路通。
 4. 读不到就依次查：USB 线/驱动、板子是否上电、10 针排线方向（红线对 1 脚）、JTAG 座是否插偏。
+5. 不开 GUI 的等价检查（几秒出结果）：`E:\bin\bw_commands_prompt.exe E:/fpga-2026/dsh_code/tools/bw_probe.tcl`，
+   打印 `PRG-1000 : Connect device: 0:EG4S20BG256` 就说明链路通。
 
 ### 1.4 下载到 SRAM（调试用，掉电丢失，最常用）
 
@@ -147,13 +160,28 @@ cd E:\fpga-2026\dsh_code\proj\m0_hdmi
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-## 8. 命令行烧录（可选，bw Tcl）
+## 8. 命令行烧录（一条命令上板，已在本机实测）
 
-TD 的下载器也能不开 GUI、用 Tcl 驱动：`E:\bin\bw_commands_prompt.exe <脚本.tcl>`。
-已验证可用的命令（本机未接下载器时探测）：
+`tools\flash.ps1` 封装了 BitWriter 的 Tcl 接口，不用开 GUI：
 
-* `list_cable` —— 列出下载器，没接线时正常返回空；
-* `connect_cable`、`program`、`read_device_id` —— 没接线时报 `PRG-9505 USB device open error`（说明命令确实在找下载器）；
-* 还有 `program_spi`、`program_spibin`、`verify_spi`、`erase_spi`、`get_flash_manufacturer`、`export_program_log` 等。
+```powershell
+cd E:\fpga-2026\dsh_code\tools
+powershell -NoProfile -ExecutionPolicy Bypass -File .\flash.ps1 -Proj m2_720p   # 按工程名 → 烧 SRAM
+powershell -NoProfile -ExecutionPolicy Bypass -File .\flash.ps1 -Bit D:\x.bit   # 指定 bit 文件
+#   加 -Spd 2            降 TCK（默认 5 MHz），下载不稳时用
+#   加 -Mode program_spi 写 SPI Flash（本板未验证）
+```
 
-等第一次接上 AL-LINK，我再把「一条命令烧某一个里程碑 + 打印结果」的脚本（`tools/bw_program.tcl` + `flash.ps1`）写好并验证参数；以后改一版 RTL 就能一条命令上板，不用点 GUI。
+成功时最后一行是 `OK flashed xxx.bit -> SRAM, 19.0 s`，完整日志在 `tools\flash-last.log`。
+实测：629 KB 的 720p 位流、5 MHz TCK，**18.7 s** 烧完（GUI 里同样的活也是这个量级）。
+
+底层原理（`tools\bw_program.tcl`；参数走环境变量 `BW_BIT / BW_MODE / BW_SPD / BW_CABLE`）：
+
+* `E:\bin\bw_commands_prompt.exe <脚本.tcl>` 是个 Tcl shell；**多余的命令行词会被当成更多脚本文件**，所以参数只能用环境变量传；
+* `list_cable` → `PRG-1000 : Connect device: 0:EG4S20BG256`（下载器 + 目标器件都通）；
+* `read_device_id` → `EG4S20BG256`；
+* `download -bit <bit> -mode jtag -spd 5 -cable 0` → 内部依次 `bit_to_vec -chip … -m jtag_burst` → `program -mode svf -p`，
+  打印进度条和 `PRG-2014 : Chip validation success: EG4S20BG256`；`-mode jtag` = 下到 SRAM；
+* 其它可用模式：`program_spi / verify_spi / erase_spi / x_rdbk / refresh`；
+* `-h` 帮助是弹 GUI 对话框、抓不到 stdout；参数语法直接从 exe 里的字符串看。
+
