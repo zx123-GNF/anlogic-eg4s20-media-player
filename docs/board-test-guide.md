@@ -35,6 +35,12 @@
    ```
    （工具会顺手做尺寸转换和 BMP 头，`--check` 可自校验）
 4. 把生成的 `IMGnnnn.BMP` 拷到卡根目录，插卡上电。
+5. 如果手上是**裸 RGB565 帧**（640×480、2 B/像素、无文件头、正好 614400 B，比如 `image_1_640x480_rgb565.bin`）：
+   播放器**不认**这种文件（没有 BMP 头 → 判坏图回退测试图案），先一步转成播放器格式（无损）：
+   ```powershell
+   python E:\fpga-2026\dsh_code\tools\rgb565_to_bmp.py 目录或文件.bin -o 输出目录
+   ```
+   默认按小端解释 565 字（高字节在前的文件加 `--big-endian`）；输出的 `IMG0001.BMP`… 直接拷卡。
 
 > **现成的 6 张测试图**已经生成在 `dsh_code\demo\`（色条+十字线、灰阶+RGB 渐变、网格棋盘、RGB 三色块、大号图号 5、文字说明）。直接把 `IMG0001.BMP`~`IMG0006.BMP` 拷到卡根目录就能测 M2/M3/M4。想重新生成或改内容：`python tools\make_demo_images.py`。
 

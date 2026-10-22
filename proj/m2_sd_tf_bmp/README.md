@@ -12,7 +12,8 @@ AC208（EG4S20BG256）· 安路 TD Release_2026.1_SP2 · 纯 Verilog + 2 个 PLL
   写进 SDRAM 的**页 B**，写完整页后在场消隐**切页**显示；KEY0/KEY1 切换图片；
   没有卡 / 没有 BMP / BMP 不合格时回退显示 M1 的测试图案。
 * **报告**：`E:\fpga-2026\dsh_code\docs\research\m2-report.md`
-* **工具**：`E:\fpga-2026\dsh_code\tools\make_bmp.py`（任意图片 → 播放器能读的 BMP）
+* **工具**：`E:\fpga-2026\dsh_code\tools\make_bmp.py`（任意图片 → 播放器能读的 BMP）；
+  `tools\rgb565_to_bmp.py`（裸 RGB565 帧 `*.bin` → 同样的 BMP，无损）
 
 ## 数据通路
 
