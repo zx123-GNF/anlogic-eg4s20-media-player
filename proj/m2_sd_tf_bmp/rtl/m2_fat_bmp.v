@@ -835,7 +835,17 @@ module m2_fat_bmp #(
             end
 
             S_PP_W: begin
-                if (I_pp_done) S_st <= S_ADV;
+                if (I_pp_done) begin
+                    // FIX: the counter of pixel bytes still to read was set at the
+                    // BMP header (921600) and never decreased, so S_DSEC never saw
+                    // pixleft==0: the loader kept pumping sectors until it had
+                    // overrun the page, the writer finished and went idle, the
+                    // pump then blocked on O_pix_ready and the FSM stayed in
+                    // S_PP_W forever -> S_DEND / page swap never happened and the
+                    // screen stayed black (no error code either).
+                    S_pixleft <= S_pixleft - {22'd0, O_pp_cnt};
+                    S_st      <= S_ADV;
+                end
             end
 
             S_ADV: begin
