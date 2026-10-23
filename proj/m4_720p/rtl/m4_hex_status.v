@@ -97,7 +97,7 @@ module m4_hex_status #(
     end
 
     // digits 2..5 are not used: 1100_1100 disables them (1 = digit on)
-    assign O_sw   = BLANK_MIDDLE ? 8'b1100_1100 : 8'hFF;
+    assign O_sw   = BLANK_MIDDLE ? 8'b1100_0011 : 8'hFF;
     assign O_mode = Q_paused;
 
 endmodule

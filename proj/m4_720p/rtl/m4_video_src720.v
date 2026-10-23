@@ -23,7 +23,7 @@
 //  one full frame consumes exactly 307200 words per port, i.e. one page, and
 //  the controller's wrap point (RD1_MAX_ADDR = page end) puts both heads back
 //  at the page base at every frame start.  The page swap is executed in the
-//  vertical blanking exactly like m4_video_src.v.
+//  vertical blanking exactly like m3_video_src.v.
 //
 //  AXIS:  valid = every active pixel of the 1280x720 canvas,
 //         data  = page pixel inside the window, black everywhere else,
@@ -176,14 +176,17 @@ module m4_video_src720 #(
     // 1 s mark and S_hold_done swallows the following release, so a long press
     // never also steps to the next image.
     //-------------------------------------------------------------------------
-    reg [25:0] S_hold_cnt;
+    //  1 s at 73.333 MHz = 73_333_332 clocks, which does NOT fit in 26 bits
+    //  (2^26 = 67_108_864), so the counter must be 27 bit wide -- with 26 bit
+    //  the comparison below never became true and KEY0 long press did nothing.
+    reg [26:0] S_hold_cnt;
     reg        S_hold_done;
     reg        S_paused;
     reg        S_pause_ev;
 
     always @(posedge I_clk) begin
         if (I_rst) begin
-            S_hold_cnt  <= 26'd0;
+            S_hold_cnt  <= 27'd0;
             S_hold_done <= 1'b0;
             S_paused    <= 1'b0;
             S_pause_ev  <= 1'b0;
@@ -191,7 +194,7 @@ module m4_video_src720 #(
             S_pause_ev <= 1'b0;
 
             if (S_key_press[0]) begin
-                S_hold_cnt  <= 26'd0;
+                S_hold_cnt  <= 27'd0;
                 S_hold_done <= 1'b0;
             end else if (!S_key_stb[0] && !S_hold_done) begin
                 if (S_hold_cnt >= (HOLD_CLKS - 1)) begin
@@ -199,7 +202,7 @@ module m4_video_src720 #(
                     S_paused    <= ~S_paused;
                     S_pause_ev  <= 1'b1;
                 end else begin
-                    S_hold_cnt  <= S_hold_cnt + 26'd1;
+                    S_hold_cnt  <= S_hold_cnt + 27'd1;
                 end
             end
         end
@@ -340,7 +343,7 @@ module m4_video_src720 #(
     // Read ONLY the display port that is currently on screen.
     //
     //  Bandwidth: inside the window one word per pixel at 73.33 MHz = 73.3 M
-    //  words/s.  Reading BOTH ports (as the 640x480 m4_video_src does, where
+    //  words/s.  Reading BOTH ports (as the 640x480 m3_video_src does, where
     //  2 x 25 MHz = 50 M words/s is fine) would need 146 M words/s, which the
     //  single 100 MHz 32 bit SDRAM port of Sdram_Control_4Port cannot deliver
     //  (~90 M words/s) -> the read FIFOs would run dry in the middle of every

@@ -176,14 +176,17 @@ module m3_video_src720 #(
     // 1 s mark and S_hold_done swallows the following release, so a long press
     // never also steps to the next image.
     //-------------------------------------------------------------------------
-    reg [25:0] S_hold_cnt;
+    //  1 s at 73.333 MHz = 73_333_332 clocks, which does NOT fit in 26 bits
+    //  (2^26 = 67_108_864), so the counter must be 27 bit wide -- with 26 bit
+    //  the comparison below never became true and KEY0 long press did nothing.
+    reg [26:0] S_hold_cnt;
     reg        S_hold_done;
     reg        S_paused;
     reg        S_pause_ev;
 
     always @(posedge I_clk) begin
         if (I_rst) begin
-            S_hold_cnt  <= 26'd0;
+            S_hold_cnt  <= 27'd0;
             S_hold_done <= 1'b0;
             S_paused    <= 1'b0;
             S_pause_ev  <= 1'b0;
@@ -191,7 +194,7 @@ module m3_video_src720 #(
             S_pause_ev <= 1'b0;
 
             if (S_key_press[0]) begin
-                S_hold_cnt  <= 26'd0;
+                S_hold_cnt  <= 27'd0;
                 S_hold_done <= 1'b0;
             end else if (!S_key_stb[0] && !S_hold_done) begin
                 if (S_hold_cnt >= (HOLD_CLKS - 1)) begin
@@ -199,7 +202,7 @@ module m3_video_src720 #(
                     S_paused    <= ~S_paused;
                     S_pause_ev  <= 1'b1;
                 end else begin
-                    S_hold_cnt  <= S_hold_cnt + 26'd1;
+                    S_hold_cnt  <= S_hold_cnt + 27'd1;
                 end
             end
         end
