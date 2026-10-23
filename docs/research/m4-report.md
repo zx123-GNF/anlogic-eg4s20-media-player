@@ -1,8 +1,8 @@
 # M4 里程碑报告：板载 WM8960 音频输出（I2C 初始化 + I2S 发送 + 1 kHz 正弦测试音）
 
-- 日期：2026-10-21
-- 状态：**编译验收通过**（bit 已生成，两次独立全清编译 payload 逐行一致）；
-  **离线模型 146 项检查全 PASS**；功能未上板实测（本机无板卡）
+- 日期：2026-10-21（离线版）；**2026-10-23 上板实测通过**
+- 状态：**已上板验证通过**（2026-10-23：耳机 1 kHz 出声，D3+D2 常亮、D1 灭）；
+  **离线模型 146 项检查全 PASS**；上板实测、引脚修正与 I²C 帧时序修复见 **§10**
 - 工程：`E:\fpga-2026\dsh_code\proj\m4_audio\`（由 M3 工程复制 → 改名 → 重建 run 目录）
 - 依据：`docs/research/m3-report.md`（先读）、`m0-report.md`、`hw-facts.md` §7、
   `example-arch.md` §5、`docs/specs/2026-10-21-hdmi-basic-player-design.md` §8；
@@ -19,7 +19,7 @@
 | 项 | 结果 |
 |---|---|
 | 工程/顶层 | `proj/m4_audio/m4_audio.al`，顶层 `m4_top`，**26 个 IO**（M3 的 19 个 + 音频 7 个） |
-| 新增 IO | `I2S_MCLK`=B8、`I2S_BCLK`=C8、`I2S_DACLRC`=A8、`I2S_DACDAT`=A7、`I2S_ADCLRC`=C7、`I2C_SCL`=L16、`I2C_SDA`=M16（三态） |
+| 新增 IO | `I2S_MCLK`=B8、`I2S_BCLK`=C8、**`I2S_DACLRC`=A7**、**`I2S_DACDAT`=A8**、`I2C_SCL`=L16、`I2C_SDA`=M16（三态）；原 `I2S_ADCLRC`=C7 **已删除**（C7 是 codec 输出脚，见 §10.3） |
 | 时钟 | **新增第 5 个时钟域 `mclk_audio` = 12.288136 MHz**，第 3 个 PLL（`pll_m4_audio`，VCO 725 MHz，C0=59）；**+11 ppm**，见 §4 |
 | I2S | FPGA 主机：BCLK = MCLK/4 = **3.072034 MHz**、LRCK = BCLK/64 = **48.0005 kHz**、16 bit 数据在 32 bit 槽内、DACDAT 在 BCLK 下降沿更新、MSB 在 LRCK 翻转后第 2 个上升沿（严格 Philips I2S） |
 | I2C | 40.06 kHz（分频 312×4），**13 条寄存器**全部 ACK 检查、NACK 重试 3 次、失败即静音；总线 16 位控制字 = 7 bit 地址 + 9 bit 数据（两字节），器件写地址 **0x34** |
@@ -140,11 +140,11 @@ KEY2 释放 ─┬─ HDMI PLL 锁 ──▶ M3 显示链起振（与 M3 完全�
 
 | 端口 | 脚 | 方向 | 说明 |
 |---|---|---|---|
-| `I2S_MCLK` | B8 | out | 12.288136 MHz（PLL 直出，走全局时钟网后到 PAD） |
-| `I2S_BCLK` | C8 | out | 3.072034 MHz |
-| `I2S_DACLRC` | A8 | out | 48.0005 kHz |
-| `I2S_DACDAT` | A7 | out | 串行数据 |
-| `I2S_ADCLRC` | C7 | out | 与 DACLRC 同频（ADC 不用，但 codec 的该脚是从机输入，不能悬空） |
+| `I2S_MCLK` | B8 | out | 12.288136 MHz（PLL 直出，走全局时钟网后到 PAD）；核心板 pin 96 = ES_MCLK |
+| `I2S_BCLK` | C8 | out | 3.072034 MHz；核心板 pin 97 = ES_DSCLK |
+| `I2S_DACLRC` | **A7** | out | 48.0005 kHz；核心板 pin 101 = **ES_DLCLK**（管脚表误标为 A8，见 §10.3） |
+| `I2S_DACDAT` | **A8** | out | 串行数据；核心板 pin 98 = **ES_DSDIN** |
+| ~~`I2S_ADCLRC`~~ | ~~C7~~ | ~~out~~ | **已删除**：C7 = 核心板 pin 102 = ES_ASDOUT，是 **codec 的输出脚**，不能驱动（§10.3） |
 | `I2C_SCL` | L16 | out | 推挽（板上只有一个主） |
 | `I2C_SDA` | M16 | inout | 三态：`oe ? o : 1'bz`，ACK 位读回 |
 
@@ -845,3 +845,87 @@ Hold             : WNS     3ps  TNS        0ps  NUM_FEPS     0
 4. **HDMI 带声音**：`audio_arc_calculate` + HDMI 核的 `I_audio_*` 端口已存在（M0 里接 0），
    把同一个样点流同时送过去即可；注意 ACR_N 与 48 kHz 匹配（example-arch §5.3）。
 5. **若要更纯的正弦**：正弦表 512 项/象限（仍 1 个 BRAM9K），THD 可从 −55.6 dB 到约 −61 dB。
+
+---
+
+## 15. 上板实测（2026-10-23 夜，AC208 板）
+
+本节记录离线报告与真实板卡之间的三处偏差，以及"没声音"的两个真正原因。
+（同一份内容在 `docs/research/bench-bringup-postmortem.md` §6，从调试过程的角度写的。）
+
+### 15.1 板上 codec 的地址是测出来的，不是查出来的
+
+新加 **`rtl/m4_i2c_scan.v`**（`DEBUG_AUDIO == 2`）：复位 50 ms 后每 ~0.67 s 扫 128 个 7 位地址，
+单字节写事务，结果 ASCII 打到 CH340E（`#addr:ack`）。实测：
+
+```
+#SDA=1
+ACK: 1A  50  51  58
+```
+
+| 地址 | 器件 | 含义 |
+|---|---|---|
+| **0x1A** | **WM8960**（8 bit 写地址 0x34） | 本板确实是 WM8960 版 |
+| 0x50 | 24LC256 EEPROM | 总线/上拉/引脚正常 |
+| 0x51 | PCF8563 RTC | 总线正常 |
+| 0x58 | MAC 地址 EEPROM | 总线正常 |
+
+- SDA 空闲电平 = 1 → 总线上拉、FPGA 三态释放都正常。
+- 因此 §5.4 的寄存器表、器件地址 0x34 全部正确；**之前怀疑的 ES8388（0x20）不成立**，
+  厂商资料里那份 ES8388 原理图属于另一个 AC201 版本。
+
+### 15.2 bug：I²C 多字节帧的字节间多出一个 SCL 脉冲（"一直 NACK"的真凶）
+
+**现象**：单字节探测 ACK，3 字节寄存器写全部 NACK（LED D1 常亮）。
+
+**原因**：`m4_i2s_bit_shift.v` 每写完一个字节（含 ACK）就回到 idle 分支，而 idle 分支
+无条件把 SCL 拉高；ACK 结束时 SCL 本来为低，于是从机在字节之间看到一个多余上升沿
+（SDA 已释放 = 高），当作一位数据 → 后两个字节整体错位 → NACK。
+
+**修法**：新增 `S_hold`：非最后一字节结束时保持 **SCL 低、SDA 释放**，
+下一字节命令到来时直接在 SCL 低电平期间放数据位；只有 STOP/中止后才回空闲高。
+（单字节事务不受影响，所以扫描器能通过——这正是"工具能跑、初始化失败"的原因。）
+
+### 15.3 bug：I²S 引脚接反 + 误驱动 codec 输出脚
+
+以 **AC601 核心板原理图（U1 球号 → 网络）** 为准，并和厂商可运行的 `board_test/IO.adc`
+交叉验证（`A8=I2S_DO`、`A7=I2S_RCLK`、`C7=I2S_DI`）：
+
+| FPGA 球 | 核心板 pin | 核心板网络 | 实际含义 | 修正 |
+|---|---|---|---|---|
+| B8 | 96 | ES_MCLK | codec MCLK | 不变 |
+| C8 | 97 | ES_DSCLK | codec SCLK（BCLK） | 不变 |
+| A8 | 98 | ES_DSDIN | **DAC 数据** | `I2S_DACDAT` |
+| A7 | 101 | ES_DLCLK | **LRCK** | `I2S_DACLRC` |
+| C7 | 102 | ES_ASDOUT | **codec 输出（ADCDAT）** | 删除该输出 |
+
+管脚表 `AC201-EG4S20管脚信息表.xlsx` 把 A8/A7 标成 DACLRC/DACDAT（且列了 WM8960 的 6 个音频脚），
+与实际布线相反；**以核心板原理图为准**。C7 原来当 `ADCLRC` 推挽输出，等于和 codec 对顶，已删除。
+
+### 15.4 实测结果
+
+| 项 | 值 |
+|---|---|
+| LED | **D3（音频 PLL 锁）+ D2（13 条寄存器全 ACK）常亮，D1（NACK）灭** |
+| 声音 | 复位后约 **0.55 s**（POR 10 ms + 13 条写约 9 ms + VMID 500 ms 等）开始 1 kHz 正弦 |
+| 视频/FAT | 未受影响：`read_uart.ps1` 仍显示 `A..H` 快照与 `Z err=0 state=0x2A` |
+| bit / 时序 | **630 799 B**，SWNS **+0.133 ns**、HWNS +0.011 ns（final/routed） |
+| 工程 | 实测工程为 `proj/m4_720p`（M3 播放器 + 音频），`m4_audio` 保留为离线模型工程 |
+| 发布配置 | `DEBUG_AUDIO = 0`（正常播放状态灯）；1 = 音频状态灯；2 = I²C 扫描器 |
+
+### 15.5 复现步骤
+
+```powershell
+cd proj\m4_720p
+powershell -NoProfile -ExecutionPolicy Bypass -File .\make_proj_files.ps1   # 文件清单变了才需要
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ..\..\tools\flash.ps1 -Proj m4_720p
+powershell -NoProfile -ExecutionPolicy Bypass -File ..\..\tools\read_uart.ps1   # 可选
+```
+
+### 15.6 留给 M5 / 报告的结论
+
+1. 音频链路（I²C 初始化 → I²S 主模式 → DAC → 耳机）已在真板闭环，**M4 可以按"已验证"写进报告**。
+2. 若以后要加 **音量/静音按键**：`m4_i2s_control` 已支持任意 reg/data，只需加"单条写"入口。
+3. 若要加 **PCM/WAV 播放**：替换 `m4_sine_tone` 的数据源即可，I²S 侧不用改。
+4. 若要做 **HDMI 嵌入音频**：本板音频走 codec，HDMI 核的 `I_audio_*` 未接；这是两条独立通路。

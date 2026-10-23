@@ -46,12 +46,15 @@ module m4_top #(
     //      2 = FAT32 BPB/dir failed, 3 = no IMGnnnn.BMP found, 4 = bad BMP
     //      header, 5 = MBR signature 0x55AA missing (sector data is garbage),
     //      6 = file smaller than 640x480, 7 = no FAT partition entry accepted.
-    // Audio bring-up debug (LED map, all lights active low: LIT = condition true)
-    // DEBUG_AUDIO = 2 : I2C bus scanner instead of the initialiser, ASCII report
-    //                   on the CH340E UART (rtl/m4_i2c_scan.v; it found the
-    //                   codec at 0x1A, plus the EEPROM/RTC/MAC devices).
-    // DEBUG_AUDIO = 0 : normal play/status LEDs (release build)
-    parameter DEBUG_AUDIO = 1,
+    // Audio bring-up LED map, all lights active low (LIT = the condition is true)
+    //   DEBUG_AUDIO = 1 : led0 = I2C sequencer busy, led1 = an I2C write NACKed,
+    //                     led2 = all 13 WM8960 registers ACKed (init OK),
+    //                     led3 = audio PLL (12.288 MHz) locked
+    //   DEBUG_AUDIO = 2 : I2C bus scanner instead of the initialiser, ASCII
+    //                     report on the CH340E UART (rtl/m4_i2c_scan.v); it
+    //                     found the codec at 0x1A plus EEPROM/RTC/MAC devices
+    //   DEBUG_AUDIO = 0 : normal play/status LEDs (release build)
+    parameter DEBUG_AUDIO = 0,
     parameter DEBUG_ERR = 0
 ) (
     input  wire clk,            // 50 MHz, K14
