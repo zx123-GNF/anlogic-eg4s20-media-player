@@ -93,6 +93,7 @@ module m5_vdec #(
     reg  [31:0]  S_len;
     reg  [15:0]  S_aud_n;
     reg  [15:0]  S_aud_i;
+    reg  [31:0]  S_frames;   // frame count from the file header
 
     //-------------------------------------------------------------------------
     // row buffer : 320 source pixels of the row being decoded
@@ -155,6 +156,7 @@ module m5_vdec #(
             S_len        <= 32'd0;
             S_aud_n      <= 16'd0;
             S_aud_i      <= 16'd0;
+            S_frames     <= 32'd0;
             S_aud_lo     <= 1'b0;
             S_aud_hi     <= 8'd0;
             S_pix        <= 8'd0;
@@ -220,6 +222,7 @@ module m5_vdec #(
                         // byte i sits at bits [255-8i : 248-8i]  (S_hdr holds
                         // bytes 0..30 here, which is all we need: bpp is at
                         // bytes 10..11 = bits 175:160)
+                        S_frames <= S_hdr[159:128];
                         if (S_hdr[175:160] != 16'd1) begin
                             O_err <= 3'd1;                  // not RGB332
                             S_st  <= V_HDR_M;
@@ -351,8 +354,16 @@ module m5_vdec #(
             V_DONE: begin
                 O_ready_page <= O_frame_cnt[0];
                 O_ready_tog  <= ~O_ready_tog;
-                O_frame_cnt  <= O_frame_cnt + 16'd1;
-                S_st         <= V_FRAME;
+                if ((O_frame_cnt + 16'd1) >= S_frames[15:0]) begin
+                    //  end of the clip: the stream loops back to the file header,
+                    //  so the decoder must resync on "M5V1" instead of reading
+                    //  the next frame block header
+                    O_frame_cnt <= 16'd0;
+                    S_st        <= V_HDR_M;
+                end else begin
+                    O_frame_cnt <= O_frame_cnt + 16'd1;
+                    S_st        <= V_FRAME;
+                end
             end
             default: S_st <= V_WAIT;
             endcase

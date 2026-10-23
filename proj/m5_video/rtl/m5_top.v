@@ -54,8 +54,11 @@ module m5_top #(
     //                     report on the CH340E UART (rtl/m5_i2c_scan.v); it
     //                     found the codec at 0x1A plus EEPROM/RTC/MAC devices
     //   DEBUG_AUDIO = 0 : normal play/status LEDs (release build)
-    parameter DEBUG_AUDIO = 0,
-    parameter DEBUG_ERR = 0
+    // bring-up: show the stream debug word (bps, partition type, error, failure
+    // state) on all eight 7 segment digits instead of E<n>
+    parameter DEBUG_STREAM = 1,
+    parameter DEBUG_AUDIO  = 0,
+    parameter DEBUG_ERR    = 0
 ) (
     input  wire clk,            // 50 MHz, K14
     input  wire rst_n,          // KEY2, H14, low active
@@ -370,6 +373,17 @@ module m5_top #(
     wire        S_aud_we;
     wire [15:0] S_aud_data;
     wire [8:0]  S_stream_ram_addr;
+    wire [15:0] S_dbg_bps;
+    wire [3:0]  S_dbg_type;
+    wire [5:0]  S_dbg_fail;
+    wire [7:0]  S_dbg_spc, S_dbg_nfat;
+    wire [15:0] S_dbg_rsvd;
+    wire [31:0] S_dbg_data, S_dbg_fat, S_dbg_first, S_dbg_size;
+    wire [8:0]  S_dbg_secin;
+    wire [31:0] S_dbg_chk;
+    wire [31:0] S_dbg_mclus, S_dbg_flba, S_dbg_fat0;
+    wire [7:0]  S_dbg_b0;
+    wire [31:0] S_dbg_mclus, S_dbg_flba;
 
     //-------------------------------------------------------------------------
     // SD SPI engine + sector buffer (100 MHz)
@@ -426,7 +440,24 @@ module m5_top #(
         .O_dbg_clus    (S_dbg_clus),
         .O_dbg_lba     (S_dbg_lba),
         .O_dbg_byt     (S_dbg_byt),
-        .O_eof         (S_vfile_eof)
+        .O_eof         (S_vfile_eof),
+
+        .O_dbg_bps     (S_dbg_bps),
+        .O_dbg_type    (S_dbg_type),
+        .O_dbg_fail    (S_dbg_fail),
+        .O_dbg_spc     (S_dbg_spc),
+        .O_dbg_nfat    (S_dbg_nfat),
+        .O_dbg_rsvd    (S_dbg_rsvd),
+        .O_dbg_data    (S_dbg_data),
+        .O_dbg_fat     (S_dbg_fat),
+        .O_dbg_first   (S_dbg_first),
+        .O_dbg_size    (S_dbg_size),
+        .O_dbg_secin   (S_dbg_secin),
+        .O_dbg_mclus   (S_dbg_mclus),
+        .O_dbg_flba    (S_dbg_flba),
+        .O_dbg_fat0    (S_dbg_fat0),
+        .O_dbg_b0      (S_dbg_b0),
+        .O_dbg_chk     (S_dbg_chk)
     );
 
     //-------------------------------------------------------------------------
@@ -488,6 +519,10 @@ module m5_top #(
         .I_index     (S_frame_cnt[4:0]),
         .I_busy      (S_vdec_busy),
         .I_paused    (1'b0),
+
+        .I_dbg_en    (DEBUG_STREAM),
+        .I_dbg_data  (S_dbg_chk), // ({S_dbg_bps, S_dbg_type, //
+                       {1'b0, (S_vdec_err | S_str_err)}, 2'b00, S_dbg_fail}),
         .O_disp_data (S_hex_data),
         .O_sw        (S_hex_sw),
         .O_mode      (S_hex_mode)
@@ -526,15 +561,29 @@ module m5_top #(
         .CLK_HZ (50_000_000),
         .BAUD   (115200)
     ) u_dbg (
-        .I_clk     (clk),
-        .I_rst     (~S_rst_n_async),
-        .I_vst     (S_vdec_st),
-        .I_sst     (S_str_st),
-        .I_err     (S_vdec_err | S_str_err),
-        .I_mnt     (S_str_mounted),
-        .I_frm     (S_frame_cnt),
-        .I_byt     (S_dbg_byt),
-        .O_uart_tx (S_dbg_tx)
+        .I_clk        (clk),
+        .I_rst        (~S_rst_n_async),
+        .I_sst        (S_str_st),
+        .I_vst        (S_vdec_st),
+        .I_err        (S_vdec_err | S_str_err),
+        .I_mnt        (S_str_mounted),
+        .I_frm        (S_frame_cnt),
+        .I_spc        (S_dbg_spc),
+        .I_mclus      (S_dbg_mclus),
+        .I_flba       (S_dbg_flba),
+        .I_fat0       (S_dbg_fat0),
+        .I_chk        (S_dbg_chk),
+        .I_b0         (S_dbg_b0),
+        .I_data_lba   (S_dbg_data),
+        .I_fat_lba    (S_dbg_fat),
+        .I_first_clus (S_dbg_first),
+        .I_clus       (S_dbg_clus),
+        .I_lba        (S_dbg_lba),
+        .I_size       (S_dbg_size),
+        .I_byt        (S_dbg_byt),
+        .I_fail       (S_dbg_fail),
+        .I_secin      (S_dbg_secin),
+        .O_uart_tx    (S_dbg_tx)
     );
 
     // I2C scanner debug build: its ASCII report replaces the FAT dumper
@@ -701,7 +750,7 @@ module m5_top #(
     end
     assign led = (DEBUG_AUDIO == 2) ? {~S_scan_done, ~S_scan_any, ~S_scan_codec, ~S_scan_busy}
                : DEBUG_AUDIO        ? {~S_audio_lock, ~S_init_ok, ~S_init_nack, ~S_init_busy}
-               : DEBUG_ERR          ? {1'b1, 1'b0, ~S_vdec_err, ~S_str_err}
+               : DEBUG_ERR          ? {1'b1, (S_str_err != 3'd0), (S_vdec_err != 3'd0), S_str_mounted}
                :                      S_led;
 
     //-------------------------------------------------------------------------

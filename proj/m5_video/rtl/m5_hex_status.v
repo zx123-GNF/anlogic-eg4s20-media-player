@@ -35,6 +35,11 @@ module m5_hex_status #(
     input  wire        I_busy,
     input  wire        I_paused,
 
+    // bring-up: show I_dbg_data on all eight digits instead of the normal
+    // E<n> / count+index layout
+    input  wire        I_dbg_en,
+    input  wire [31:0] I_dbg_data,
+
     output reg  [31:0] O_disp_data,
     output wire [7:0]  O_sw,            // digit enable mask, 0 = digit off
     output wire        O_mode           // HEX8 mode: 1 = DP on digits 3 / 7
@@ -86,7 +91,9 @@ module m5_hex_status #(
     wire [7:0]  W_idx2 = BCD2(Q_index + 5'd1);
 
     always @(*) begin
-        if (Q_err != 3'd0) begin
+        if (I_dbg_en) begin
+            O_disp_data = I_dbg_data;
+        end else if (Q_err != 3'd0) begin
             // "E<n>": nibble1 = 'E', nibble0 = error code
             O_disp_data = {16'hFFFF, 4'hF, 4'hF, 4'hE, {1'b0, Q_err}};
         end else begin
@@ -97,7 +104,8 @@ module m5_hex_status #(
     end
 
     // digits 2..5 are not used: 1100_1100 disables them (1 = digit on)
-    assign O_sw   = BLANK_MIDDLE ? 8'b1100_0011 : 8'hFF;
+    assign O_sw   = I_dbg_en ? 8'hFF
+                  : (BLANK_MIDDLE ? 8'b1100_0011 : 8'hFF);
     assign O_mode = Q_paused;
 
 endmodule

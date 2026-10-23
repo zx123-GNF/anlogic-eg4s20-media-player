@@ -35,7 +35,15 @@
 //=============================================================================
 `timescale 1ns / 10ps
 
-module m5_stream (
+module m5_stream #(
+    //  LINEAR = 1 : the file is assumed to be stored contiguously, so the
+    //  stream advances the LBA by one per sector and never walks the FAT
+    //  chain.  This is the demo path (the video file is copied to the card
+    //  in one go); LINEAR = 0 walks the real cluster chain.
+    parameter LINEAR = 1,
+    //  bring-up: force the very first stream LBA (0 = normal)
+    parameter [31:0] FORCE_LBA = 32'd0
+) (
     input  wire        I_clk,
     input  wire        I_rst,
     input  wire        I_sdram_ready,
@@ -64,7 +72,25 @@ module m5_stream (
     output reg  [31:0] O_dbg_clus,
     output reg  [31:0] O_dbg_lba,
     output reg  [31:0] O_dbg_byt,
-    output reg         O_eof
+    output wire [7:0]  O_dbg_spc,
+    output wire [7:0]  O_dbg_nfat,
+    output wire [15:0] O_dbg_rsvd,
+    output wire [31:0] O_dbg_data,
+    output wire [31:0] O_dbg_fat,
+    output wire [31:0] O_dbg_first,
+    output wire [31:0] O_dbg_size,
+    output wire [8:0]  O_dbg_secin,
+    output wire [31:0] O_dbg_mclus,
+    output wire [31:0] O_dbg_flba,
+    output wire [31:0] O_dbg_fat0,
+    output wire [7:0]  O_dbg_b0,
+    output wire [31:0] O_dbg_chk,
+    output reg         O_eof,
+
+    // bring-up debug (shown on the 7 segment display)
+    output reg  [15:0] O_dbg_bps,      // bytes/sector as read from the BPB
+    output reg  [3:0]  O_dbg_type,     // low nibble of the MBR partition type
+    output reg  [5:0]  O_dbg_fail      // FSM state that raised the last error
 );
 
     //=========================================================================
@@ -148,7 +174,7 @@ module m5_stream (
     // little endian multi byte fetch from the sector buffer
     //   request: S_fgo + (S_faddr, S_fn)   ->  response: S_fdone + S_fval
     //=========================================================================
-    localparam [1:0] F_IDLE = 2'd0, F_CNT = 2'd1, F_CAP = 2'd2;
+    localparam [1:0] F_IDLE = 2'd0, F_RD = 2'd1, F_CNT = 2'd2, F_CAP = 2'd3;
 
     reg [1:0]  S_fst;
     reg        S_fgo;
@@ -174,22 +200,29 @@ module m5_stream (
                         S_frd   <= S_faddr;
                         S_fi    <= 3'd0;
                         S_fval  <= 32'd0;
-                        S_fst   <= F_CNT;
+                        S_fst   <= F_RD;
                     end
                 end
+                //  the sector buffer has a REGISTERED read port: the address is
+                //  sampled one clock after it appears, the data one clock after
+                //  that, so F_RD has to wait exactly one cycle
+                F_RD: S_fst <= F_CNT;
                 F_CNT: begin
                     S_fbyte <= S_dbuf;
                     S_fst   <= F_CAP;
                 end
                 F_CAP: begin
-                    S_fval <= S_fval | ({24'd0, S_fbyte} << (S_fi * 3'd8));
+                    //  NOTE: S_fi * 8 was WRONG - both operands were 3 bit wide, so the
+                    //  constant 8 was truncated to 0 and every byte was shifted by 0.
+                    //  bytes/sector then read as 2 instead of 512 (error 2 on the bench).
+                    S_fval <= S_fval | ({24'd0, S_fbyte} << {S_fi, 3'b000});
                     if ((S_fi + 3'd1) == S_fn) begin
                         S_fdone <= 1'b1;
                         S_fst   <= F_IDLE;
                     end else begin
                         S_fi    <= S_fi + 3'd1;
                         S_frd   <= S_frd + 9'd1;
-                        S_fst   <= F_CNT;
+                        S_fst   <= F_RD;
                     end
                 end
                 default: S_fst <= F_IDLE;
@@ -245,16 +278,42 @@ module m5_stream (
         T_FAT_CL_W = 6'd41,
         T_LOOP     = 6'd42,
         T_RETRY    = 6'd43,
-        T_DIR_NEXT = 6'd44;
+        T_DIR_NEXT = 6'd44,
+        T_ROOT_PRE = 6'd45,
+        T_ROOT_PRE2= 6'd46,
+        T_ST_PRE   = 6'd47,
+        T_ST_PRE2  = 6'd48,
+        T_FAT_PRE  = 6'd49,
+        T_CHK      = 6'd52,
+        T_CHK_W    = 6'd53,
+        T_DIR_CH   = 6'd50,
+        T_DIR_CH_W = 6'd51;
 
     localparam [19:0] POR_LIMIT = 20'd1_000_000;    // 10 ms at 100 MHz
 
     reg [5:0]  S_st, S_after;
+    reg [5:0]  S_prev;              // previous state, for the failure capture
     reg [19:0] S_por;
     reg [19:0] S_wait;
     reg [3:0]  S_retry;
 
     reg [31:0] S_part_lba, S_fat_lba, S_data_lba, S_root_clus;
+    //  pipelined sector LBA: (cluster-2)*spc is a 32 bit multiply, so it is
+    //  registered in its own stage; the address adder is the second stage.
+    //  Without this the O_sd_lba path was 12.2 ns (SWNS -2.489 ns).
+    reg [31:0] S_clus_off, S_lba_r;
+    reg [31:0] S_dbg_mclus, S_dbg_flba;
+    reg        S_dbg_cap;
+    reg [31:0] S_dbg_mclus, S_dbg_flba, S_dbg_fat0, S_dbg_chk;
+    reg        S_chk_done;
+    reg [7:0]  S_dbg_b0;
+    reg        S_dbg_cap, S_dbg_fcap, S_dbg_bcap;
+    reg [15:0] S_clus_lo;
+    reg [31:0] S_lin_lba;           // LINEAR mode: LBA of the next sector
+    reg [31:0] S_lin_cnt;           // LINEAR mode: sectors left in the file
+    reg [31:0] S_lin_tot;
+    reg        S_lin_pend;          // 1 = the first LBA still has to be computed           // FAT32 dir entry: cluster low word at +26,
+                                    //                       high word at +20
     reg [7:0]  S_spc, S_nfat;
     reg [15:0] S_rsvd;
     reg [31:0] S_fatsz;
@@ -264,12 +323,11 @@ module m5_stream (
     reg [4:0]  S_name_i;
     reg [8:0]  S_byte_ptr;
     reg        S_name_ok;
-    reg        S_by_req;            // streaming byte : read address in flight
+    reg  [1:0] S_by_st;             // streaming byte read: 0 idle, 1 addr, 2 capture
 
-    wire [31:0] S_clus_lba = S_data_lba + (S_clus - 32'd2) * {23'd0, S_spc}
-                           + {23'd0, S_sec_in};
-    wire [31:0] S_root_lba = S_data_lba + (S_root_clus - 32'd2) * {23'd0, S_spc}
-                           + {23'd0, S_sec_in};
+    //  staged: the multiply is registered on its own, the add on the next
+    wire [31:0] S_cl_off_w = (S_clus - 32'd2) * {23'd0, S_spc};
+    wire [31:0] S_rt_off_w = (S_root_clus - 32'd2) * {23'd0, S_spc};
     wire [8:0]  S_entry_off = {S_dir_i[3:0], 5'b0};              // dir entry * 32
     wire [8:0]  S_name_off  = S_entry_off + {4'd0, S_name_i};
     wire [8:0]  S_fat_off   = {S_clus[6:0], 2'b0};               // (clus&127)*4
@@ -299,11 +357,34 @@ module m5_stream (
     always @(posedge I_clk) begin
         if (I_rst) begin
             S_st         <= T_POR;
+            S_prev       <= T_POR;
+            O_dbg_bps    <= 16'd0;
+            O_dbg_type   <= 4'd0;
+            O_dbg_fail   <= 6'd0;
+            S_dbg_mclus  <= 32'd0;
+            S_dbg_flba   <= 32'd0;
+            S_dbg_fat0   <= 32'd0;
+            S_dbg_b0     <= 8'd0;
+            S_dbg_cap    <= 1'b0;
+            S_dbg_fcap   <= 1'b0;
+            S_dbg_bcap   <= 1'b0;
+            S_dbg_chk    <= 32'd0;
+            S_chk_done   <= 1'b0;
+            S_dbg_mclus  <= 32'd0;
+            S_dbg_flba   <= 32'd0;
+            S_dbg_cap    <= 1'b0;
             S_after      <= T_POR;
             S_brd_sel    <= 1'b0;
             S_por        <= 20'd0;
             S_wait       <= 20'd0;
             S_retry      <= 4'd0;
+            S_clus_off   <= 32'd0;
+            S_clus_lo    <= 16'd0;
+            S_lin_lba    <= 32'd0;
+            S_lin_cnt    <= 32'd0;
+            S_lin_tot    <= 32'd0;
+            S_lin_pend   <= 1'b0;
+            S_lba_r      <= 32'd0;
             S_part_lba   <= 32'd0;
             S_fat_lba    <= 32'd0;
             S_data_lba   <= 32'd0;
@@ -321,7 +402,7 @@ module m5_stream (
             S_name_i     <= 5'd0;
             S_byte_ptr   <= 9'd0;
             S_name_ok    <= 1'b0;
-            S_by_req     <= 1'b0;
+            S_by_st      <= 2'd0;
             S_brd_s      <= 9'd0;
             S_fgo        <= 1'b0;
             S_faddr      <= 9'd0;
@@ -369,13 +450,30 @@ module m5_stream (
             //------------------------------------------------- shared copy wait
             T_COPY: begin
                 if (S_cdone) begin
-                    S_st <= S_after;
                     if (S_after == T_ST_BYTE) begin
-                        S_brd_sel  <= 1'b1;
-                        S_byte_ptr <= 9'd0;
-                        S_by_req   <= 1'b0;
+                        S_brd_sel    <= 1'b1;
+                        S_byte_ptr   <= 9'd0;
+                        S_by_st      <= 2'd0;
                         O_byte_valid <= 1'b0;
-                    end
+                        if (!S_chk_done)
+                            S_st <= T_CHK;      // read back the first 4 bytes
+                        else
+                            S_st <= S_after;
+                    end else
+                        S_st <= S_after;
+                end
+            end
+            //  read 4 bytes at buffer address 0 into the debug word: proves
+            //  whether the sector copy contains real data or zeros
+            T_CHK: begin
+                S_fgo <= 1'b1; S_faddr <= 9'd0; S_fn <= 3'd4;
+                S_st  <= T_CHK_W;
+            end
+            T_CHK_W: begin
+                if (S_fdone) begin
+                    S_dbg_chk  <= S_fval;
+                    S_chk_done <= 1'b1;
+                    S_st       <= T_ST_BYTE;
                 end
             end
             //------------------------------------------------- MBR
@@ -402,6 +500,7 @@ module m5_stream (
             end
             T_PART_W: begin
                 if (S_fdone) begin
+                    O_dbg_type <= S_fval[3:0];
                     if (S_fval == 32'd0) begin
                         S_part_lba <= 32'd0;
                         S_st       <= T_BPB_GO;
@@ -436,6 +535,7 @@ module m5_stream (
             T_BPS: begin S_fgo <= 1'b1; S_faddr <= 9'd11; S_fn <= 3'd2; S_st <= T_BPS_W; end
             T_BPS_W: begin
                 if (S_fdone) begin
+                    O_dbg_bps <= S_fval[15:0];
                     if (S_fval != 32'd512) begin
                         O_err <= 3'd2; S_wait <= 20'd0; S_st <= T_RETRY;
                     end else S_st <= T_SPC;
@@ -476,12 +576,20 @@ module m5_stream (
                     S_root_clus <= S_fval;
                     S_clus      <= S_fval;
                     S_sec_in    <= 9'd0;
-                    S_st        <= T_ROOT_GO;
+                    S_st        <= T_ROOT_PRE;
                 end
             end
             //------------------------------------------------- root directory
+            T_ROOT_PRE: begin
+                S_clus_off <= S_rt_off_w;
+                S_st       <= T_ROOT_PRE2;
+            end
+            T_ROOT_PRE2: begin
+                S_lba_r <= S_data_lba + S_clus_off + {23'd0, S_sec_in};
+                S_st    <= T_ROOT_GO;
+            end
             T_ROOT_GO: begin
-                O_sd_lba   <= S_root_lba;
+                O_sd_lba   <= S_lba_r;
                 O_sd_start <= 1'b1;
                 S_dir_i    <= 8'd0;
                 S_st       <= T_ROOT_W;
@@ -525,12 +633,23 @@ module m5_stream (
                 end
             end
             T_DIR_CL: begin
-                S_fgo <= 1'b1; S_faddr <= S_entry_off + 9'd26; S_fn <= 3'd4;
+                //  FAT32 dir entry: FstClusLO is at +26, FstClusHI at +20
+                S_fgo <= 1'b1; S_faddr <= S_entry_off + 9'd26; S_fn <= 3'd2;
                 S_st  <= T_DIR_CL_W;
             end
             T_DIR_CL_W: begin
                 if (S_fdone) begin
-                    S_first_clus <= S_fval;
+                    S_clus_lo <= S_fval[15:0];
+                    S_st      <= T_DIR_CH;
+                end
+            end
+            T_DIR_CH: begin
+                S_fgo <= 1'b1; S_faddr <= S_entry_off + 9'd20; S_fn <= 3'd2;
+                S_st  <= T_DIR_CH_W;
+            end
+            T_DIR_CH_W: begin
+                if (S_fdone) begin
+                    S_first_clus <= {S_fval[15:0], S_clus_lo};
                     S_st         <= T_DIR_SZ;
                 end
             end
@@ -543,11 +662,15 @@ module m5_stream (
                     if (S_name_ok && (S_fval != 32'd0)) begin
                         S_file_size <= S_fval;
                         S_clus      <= S_first_clus;
+                        S_dbg_mclus <= S_first_clus;
+                        S_lin_cnt   <= (S_fval + 32'd511) >> 9;
+                        S_lin_tot   <= (S_fval + 32'd511) >> 9;
+                        S_lin_pend  <= 1'b1;
                         S_sec_in    <= 9'd0;
                         S_bytes     <= 32'd0;
                         O_mounted   <= 1'b1;
                         O_err       <= 3'd0;
-                        S_st        <= T_ST_GO;
+                        S_st        <= T_ST_PRE;
                     end else
                         S_st <= T_DIR_NEXT;
                 end
@@ -559,7 +682,7 @@ module m5_stream (
                         O_err <= 3'd4; S_wait <= 20'd0; S_st <= T_RETRY;
                     end else begin
                         S_sec_in <= S_sec_in + 9'd1;
-                        S_st     <= T_ROOT_GO;
+                        S_st     <= T_ROOT_PRE;
                     end
                 end else begin
                     S_dir_i <= S_dir_i + 8'd1;
@@ -567,11 +690,36 @@ module m5_stream (
                 end
             end
             //------------------------------------------------- stream a sector
+            T_ST_PRE: begin
+                if (LINEAR && !S_lin_pend) begin
+                    S_lba_r <= S_lin_lba;
+                    S_st    <= T_ST_GO;
+                end else begin
+                    S_clus_off <= S_cl_off_w;
+                    S_st       <= T_ST_PRE2;
+                end
+            end
+            T_ST_PRE2: begin
+                S_lba_r    <= (FORCE_LBA != 32'd0) ? FORCE_LBA
+                                                        : (S_data_lba + S_clus_off + {23'd0, S_sec_in});
+                S_lin_lba  <= S_data_lba + S_clus_off + 32'd1;
+                S_lin_pend <= 1'b0;
+                S_st       <= T_ST_GO;
+            end
             T_ST_GO: begin
-                O_sd_lba   <= S_clus_lba;
+                if (!S_dbg_cap) begin
+                    S_dbg_cap  <= 1'b1;
+                    S_dbg_flba <= S_lba_r;
+                end
+                O_sd_lba   <= S_lba_r;
                 O_sd_start <= 1'b1;
                 O_dbg_clus <= S_clus;
-                O_dbg_lba  <= S_clus_lba;
+                O_dbg_lba  <= S_lba_r;
+                if (LINEAR && !S_lin_pend) S_lin_lba <= S_lba_r + 32'd1;
+                if (!S_dbg_cap) begin
+                    S_dbg_cap  <= 1'b1;
+                    S_dbg_flba <= S_lba_r;
+                end
                 S_st       <= T_ST_W;
             end
             T_ST_W: begin
@@ -585,15 +733,22 @@ module m5_stream (
             end
             T_ST_BYTE: begin
                 if (!O_byte_valid) begin
-                    if (!S_by_req) begin
-                        S_brd_s  <= S_byte_ptr;
-                        S_by_req <= 1'b1;
-                    end else begin
+                    case (S_by_st)
+                    2'd0: begin
+                        S_brd_s <= S_byte_ptr;
+                        S_by_st <= 2'd1;
+                    end
+                    2'd1: S_by_st <= 2'd2;        // registered RAM read latency
+                    default: begin
                         O_byte       <= S_dbuf;
                         O_byte_valid <= 1'b1;
-                        S_by_req     <= 1'b0;
-            S_brd_s      <= 9'd0;
+                        S_by_st      <= 2'd0;
+                        if (!S_dbg_bcap) begin
+                            S_dbg_bcap <= 1'b1;
+                            S_dbg_b0   <= S_dbuf;
+                        end
                     end
+                    endcase
                 end else if (I_byte_ready) begin
                     O_byte_valid <= 1'b0;
                     O_dbg_byt    <= O_dbg_byt + 32'd1;
@@ -607,17 +762,24 @@ module m5_stream (
                 end
             end
             T_ST_NEXT: begin
-                if ((S_sec_in + 9'd1) >= {1'b0, S_spc}) begin
+                if (LINEAR) begin
+                    S_lin_cnt <= S_lin_cnt - 32'd1;
+                    S_st      <= T_ST_PRE;
+                end else if ((S_sec_in + 9'd1) >= {1'b0, S_spc}) begin
                     S_sec_in <= 9'd0;
-                    S_st     <= T_FAT_GO;
+                    S_st     <= T_FAT_PRE;
                 end else begin
                     S_sec_in <= S_sec_in + 9'd1;
-                    S_st     <= T_ST_GO;
+                    S_st     <= T_ST_PRE;
                 end
             end
             //------------------------------------------------- FAT chain
+            T_FAT_PRE: begin
+                S_lba_r <= S_fat_sec;
+                S_st    <= T_FAT_GO;
+            end
             T_FAT_GO: begin
-                O_sd_lba   <= S_fat_sec;
+                O_sd_lba   <= S_lba_r;
                 O_sd_start <= 1'b1;
                 S_st       <= T_FAT_W;
             end
@@ -631,6 +793,10 @@ module m5_stream (
                 end
             end
             T_FAT_CL: begin
+                if (!S_dbg_fcap) begin
+                    S_dbg_fcap <= 1'b1;
+                    S_dbg_fat0 <= S_fval;
+                end
                 S_fgo <= 1'b1; S_faddr <= S_fat_off; S_fn <= 3'd4; S_st <= T_FAT_CL_W;
             end
             T_FAT_CL_W: begin
@@ -639,22 +805,26 @@ module m5_stream (
                         S_st <= T_LOOP;
                     else begin
                         S_clus <= S_fval;
-                        S_st   <= T_ST_GO;
+                        S_st   <= T_ST_PRE;
                     end
                 end
             end
             //------------------------------------------------- loop forever
             T_LOOP: begin
-                O_eof     <= 1'b1;
+                O_eof      <= 1'b1;
+                S_lin_pend <= 1'b1;
+                S_lin_lba  <= 32'd0;
+                S_lin_cnt  <= S_lin_tot;
                 S_clus    <= S_first_clus;
                 S_sec_in  <= 9'd0;
                 S_bytes   <= 32'd0;
-                S_st      <= T_ST_GO;
+                S_st      <= T_ST_PRE;
             end
             //------------------------------------------------- error / retry
             T_RETRY: begin
+                if (S_prev != T_RETRY) O_dbg_fail <= S_prev;
                 O_byte_valid <= 1'b0;
-                S_by_req     <= 1'b0;
+                S_by_st      <= 2'd0;
             S_brd_s      <= 9'd0;
                 if (S_wait == 20'hFFFFF) begin        // ~10 ms
                     S_wait <= 20'd0;
@@ -665,7 +835,23 @@ module m5_stream (
             end
             default: S_st <= T_POR;
             endcase
+            S_prev <= S_st;
         end
     end
+
+    //  debug taps (ASCII status line in m5_dbg_vid.v)
+    assign O_dbg_spc   = S_spc;
+    assign O_dbg_nfat  = S_nfat;
+    assign O_dbg_rsvd  = S_rsvd;
+    assign O_dbg_data  = S_data_lba;
+    assign O_dbg_fat   = S_fat_lba;
+    assign O_dbg_first = S_first_clus;
+    assign O_dbg_size  = S_file_size;
+    assign O_dbg_secin = S_sec_in;
+    assign O_dbg_mclus = S_dbg_mclus;
+    assign O_dbg_flba  = S_dbg_flba;
+    assign O_dbg_fat0  = S_dbg_fat0;
+    assign O_dbg_b0    = S_dbg_b0;
+    assign O_dbg_chk   = S_dbg_chk;
 
 endmodule
