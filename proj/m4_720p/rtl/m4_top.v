@@ -489,40 +489,54 @@ module m4_top #(
     );
 
     //-------------------------------------------------------------------------
-    // 7 segment display : 8 digit scan in the pixel domain + 2 x 74HC595
-    //   digit 3..0 : 1 based index of the picture on screen
-    //   digit 7..6 : number of indexed images
-    //   "E<n>"     : error code, DP of digit 0 blinks while paused
+    // 7 segment display : vendor HEX8 (1 kHz digit scan + BCD decode) feeding
+    // the vendor HC595_Driver (16 bit shift chain for the 2 x 74HC595).
+    // This pair is the proven code from the vendor board example; our own
+    // scan/shift implementation never lit the display on the bench.
+    //   digits 7..4 : number of indexed images
+    //   digits 3..0 : 1 based index of the picture on screen
+    //   "E<n>"      : error code n
+    //   HEX8 mode   : lights the DP of the two end digits while paused
     //-------------------------------------------------------------------------
-    wire [7:0] S_seg, S_sel;
-    wire       S_seg_start;
+    wire [31:0] S_hex_data;
+    wire [7:0]  S_hex_sw;
+    wire        S_hex_mode;
+    wire [7:0]  S_hex_seg, S_hex_sel;
 
-    m4_seg7 #(
-        .SCAN_DIV (73_333)              // 1 kHz digit scan at 73.333 MHz
-    ) u_seg7 (
-        .I_clk         (S_pixel_clk),
-        .I_rst         (S_rst_pixel),
-        .I_mounted     (S_fat_mounted),
-        .I_err         (S_fat_err),
-        .I_count       (S_fat_count),
-        .I_busy        (S_wr_busy),
-        .I_index       (S_fat_index),
-        .I_key         (16'hFFFF),      // no IMGnnnn key: show the list index
-        .I_paused      (S_paused),
-        .I_ready_pulse (S_ready_pulse),
-        .O_seg         (S_seg),
-        .O_sel         (S_sel),
-        .O_start       (S_seg_start)
+    m4_hex_status u_hex_status (
+        .I_clk       (clk),                 // 50 MHz display domain
+        .I_rst       (~S_rst_n_async),
+        .I_mounted   (S_fat_mounted),
+        .I_err       (S_fat_err),
+        .I_count     (S_fat_count),
+        .I_index     (S_fat_index),
+        .I_busy      (S_wr_busy),
+        .I_paused    (S_paused),
+        .O_disp_data (S_hex_data),
+        .O_sw        (S_hex_sw),
+        .O_mode      (S_hex_mode)
     );
 
-    m4_hc595 u_hc595 (
-        .I_clk   (S_pixel_clk),
-        .I_rst   (S_rst_pixel),
-        .I_data  ({S_seg, S_sel}),
-        .I_start (S_seg_start),
-        .O_sclk  (SEG7_SCLK),
-        .O_rclk  (SEG7_RCLK),
-        .O_dio   (SEG7_DIO)
+    HEX8 u_hex8 (
+        .clk       (clk),
+        .rst_n     (S_rst_n_async),
+        .en        (1'b1),
+        .switch    (1'b1),
+        .mode      (S_hex_mode),
+        .sw        (S_hex_sw),
+        .disp_data (S_hex_data),
+        .sel       (S_hex_sel),
+        .seg       (S_hex_seg)
+    );
+
+    HC595_Driver u_hc595 (
+        .Clk        (clk),
+        .Rst_n      (S_rst_n_async),
+        .Data       ({S_hex_seg, S_hex_sel}),
+        .S_EN       (1'b1),
+        .SEG7_SCLK  (SEG7_SCLK),
+        .SEG7_RCLK  (SEG7_RCLK),
+        .SEG7_DIO   (SEG7_DIO)
     );
     //-------------------------------------------------------------------------
     // debug UART dumper (CH340E on the baseboard, P2, 115200 8N1)

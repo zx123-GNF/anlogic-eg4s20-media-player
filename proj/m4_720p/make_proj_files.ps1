@@ -40,8 +40,6 @@ $files = @(
  'rtl/hdmi_phy_warpper.v',
  'rtl/hdmi1.4b_transmitter_core/hdmi_1_4b_transmitter_core_wrapper.enc.v',
  'al_ip/pll_hdmi_720p/pll_hdmi_720p.v',
- 'rtl/m4_seg7.v',
- 'rtl/m4_hc595.v',
  'rtl/m4_dbg_uart.v',
  'rtl/m4_i2s_bit_shift.v',
  'rtl/m4_i2s_control.v',
@@ -51,6 +49,9 @@ $files = @(
  'rtl/m4_sine_tone.v',
  'rtl/m4_wm8960_table.v',
  'al_ip/pll_m4_audio/pll_m4_audio.v',
+ 'rtl/HEX8.v',
+ 'rtl/HC595_Driver.v',
+ 'rtl/m4_hex_status.v',
  'rtl/m4_top.v'
 )
 

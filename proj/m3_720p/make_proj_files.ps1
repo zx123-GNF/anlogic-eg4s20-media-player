@@ -40,9 +40,10 @@ $files = @(
  'rtl/hdmi_phy_warpper.v',
  'rtl/hdmi1.4b_transmitter_core/hdmi_1_4b_transmitter_core_wrapper.enc.v',
  'al_ip/pll_hdmi_720p/pll_hdmi_720p.v',
- 'rtl/m3_seg7.v',
- 'rtl/m3_hc595.v',
  'rtl/m3_dbg_uart.v',
+ 'rtl/HEX8.v',
+ 'rtl/HC595_Driver.v',
+ 'rtl/m3_hex_status.v',
  'rtl/m3_top.v'
 )
 

@@ -224,6 +224,29 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
     wire S_disp_sync = S_dp_s[1];
 
     //-------------------------------------------------------------------------
+    // pending step requests.
+    //   The FAT FSM ignores key events while it is loading a page (~1.5 s at
+    //   5 MHz SPI), so a press during a load used to be lost -- on the bench
+    //   that looked like "S0/S1 work only now and then".  The toggle is now
+    //   counted here (saturating at 3) and consumed one per completed load.
+    //-------------------------------------------------------------------------
+    reg [1:0] Q_pn, Q_pp;
+    reg       Q_pn_use, Q_pp_use;
+
+    always @(posedge I_clk) begin
+        if (I_rst) begin
+            Q_pn <= 2'd0;
+            Q_pp <= 2'd0;
+        end else begin
+            if (S_key_next && (Q_pn != 2'd3)) Q_pn <= Q_pn + 2'd1;
+            else if (Q_pn_use)                Q_pn <= Q_pn - 2'd1;
+
+            if (S_key_prev && (Q_pp != 2'd3)) Q_pp <= Q_pp + 2'd1;
+            else if (Q_pp_use)                Q_pp <= Q_pp - 2'd1;
+        end
+    end
+
+    //-------------------------------------------------------------------------
     // sector address arithmetic
     //-------------------------------------------------------------------------
     wire [31:0] S_clus_off = (S_clus - 32'd2) << S_log2spc;
@@ -545,6 +568,8 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             C_go       <= 1'b0;
             S_app      <= 1'b0;
             S_cnt_clr  <= 1'b0;
+            Q_pn_use   <= 1'b0;
+            Q_pp_use   <= 1'b0;
 
             case (S_st)
 
@@ -775,7 +800,7 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             end
 
             S_DFAT: begin
-                O_sd_lba <= S_fat_lba + {S_clus[31:7], 7'b0};
+                O_sd_lba <= S_fat_lba + {25'd0, S_clus[31:7]};   // FAT sector = N/128 (was (N>>7)<<7)
                 S_rd_ret <= S_DFAT_C;
                 S_st     <= S_RD1;
             end
@@ -920,7 +945,7 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             end
 
             S_CFAT: begin
-                O_sd_lba <= S_fat_lba + {S_clus[31:7], 7'b0};
+                O_sd_lba <= S_fat_lba + {25'd0, S_clus[31:7]};   // FAT sector = N/128 (was (N>>7)<<7)
                 S_rd_ret <= S_CFAT_C;
                 S_st     <= S_RD1;
             end
@@ -975,18 +1000,26 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
 
             //------------------------------------------------- key handling
             S_KEY: begin
+                Q_pn_use <= 1'b0;
+                Q_pp_use <= 1'b0;
+
                 if (S_count == 5'd0) begin
-                    if (S_key_next || S_key_prev) begin
+                    // no image list yet: any pending key retries the card init
+                    if ((Q_pn != 2'd0) || (Q_pp != 2'd0)) begin
+                        if (Q_pn != 2'd0) Q_pn_use <= 1'b1;
+                        else              Q_pp_use <= 1'b1;
                         S_wd <= 20'd0;
                         S_st <= S_BOOT;                // card inserted later
                     end
-                end else if (S_key_next) begin
+                end else if (Q_pn != 2'd0) begin
+                    Q_pn_use <= 1'b1;
                     S_att  <= 5'd0;
                     C_mode <= 1'b0;                    // ascending
                     C_ref  <= S_cur_key;
                     C_go   <= 1'b1;
                     S_st   <= S_SCAN_W;
-                end else if (S_key_prev) begin
+                end else if (Q_pp != 2'd0) begin
+                    Q_pp_use <= 1'b1;
                     S_att  <= 5'd0;
                     C_mode <= 1'b1;                    // descending
                     C_ref  <= S_cur_key;
