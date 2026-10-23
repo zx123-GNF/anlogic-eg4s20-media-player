@@ -25,7 +25,10 @@
 
 module m4_i2s_init_dev #(
     parameter [19:0] POR_CLKS  = 20'd500_000,   // 10 ms at 50 MHz
-    parameter [7:0]  DEV_ADDR  = 8'h34,         // WM8960 write address (0x1A << 1)
+    //  The board carries a WM8960 (measured: the I2C bus scan ACKs at 7 bit
+    //  address 0x1A, the WM8960 address; the ES8388 would answer 0x10/0x11).
+    //  The 8 bit write byte is therefore 0x34.
+    parameter [7:0]  DEV_ADDR  = 8'h34,
     parameter [1:0]  RETRY_MAX = 2'd3           // retries per register on NACK
 )(
     input  wire I_clk,

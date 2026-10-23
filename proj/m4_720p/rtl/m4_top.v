@@ -46,6 +46,12 @@ module m4_top #(
     //      2 = FAT32 BPB/dir failed, 3 = no IMGnnnn.BMP found, 4 = bad BMP
     //      header, 5 = MBR signature 0x55AA missing (sector data is garbage),
     //      6 = file smaller than 640x480, 7 = no FAT partition entry accepted.
+    // Audio bring-up debug (LED map, all lights active low: LIT = condition true)
+    // DEBUG_AUDIO = 2 : I2C bus scanner instead of the initialiser, ASCII report
+    //                   on the CH340E UART (rtl/m4_i2c_scan.v; it found the
+    //                   codec at 0x1A, plus the EEPROM/RTC/MAC devices).
+    // DEBUG_AUDIO = 0 : normal play/status LEDs (release build)
+    parameter DEBUG_AUDIO = 1,
     parameter DEBUG_ERR = 0
 ) (
     input  wire clk,            // 50 MHz, K14
@@ -66,11 +72,13 @@ module m4_top #(
     output wire SEG7_RCLK,      // R12, 74HC595 STCP
     output wire SEG7_DIO,       // R14, 74HC595 DS
 
-    output wire I2S_MCLK,       // B8  WM8960 MCLK   (12.288136 MHz)
-    output wire I2S_BCLK,       // C8  WM8960 BCLK   (3.072034 MHz, FPGA master)
-    output wire I2S_DACLRC,     // A8  WM8960 DACLRC (48.0005 kHz, FPGA master)
-    output wire I2S_DACDAT,     // A7  WM8960 DACDAT
-    output wire I2S_ADCLRC,     // C7  WM8960 ADCLRC (ADC unused, still driven)
+    output wire I2S_MCLK,       // B8  codec MCLK   (12.288136 MHz)
+    output wire I2S_BCLK,       // C8  codec SCLK   (3.072034 MHz, FPGA master)
+    output wire I2S_DACLRC,     // A7  codec LRCK   (48.0005 kHz, FPGA master)
+    output wire I2S_DACDAT,     // A8  codec DSDIN  (DAC data)
+    //  C7 (core pin 102, ES_ASDOUT = codec ADCDAT) is a CODEC OUTPUT and is
+    //  deliberately not driven by the FPGA: the audio path here is playback
+    //  only (the old "ADCLRC" output on C7 fought the codec, see IO.adc).
     output wire I2C_SCL,        // L16 shared I2C clock (codec / EEPROM / RTC)
     inout  wire I2C_SDA,        // M16 shared I2C data (tri-state)
 
@@ -139,6 +147,17 @@ module m4_top #(
     end
 
     wire S_rst_n_async = S_pll_lock & S_key_n_sync[1];
+
+    // 50 MHz domain reset (HDMI PLL lock + KEY2), used by the I2C scanner so
+    // that it runs even if the audio PLL never locks
+    reg [1:0] S_rst50_sync;
+    always @(posedge clk or negedge S_rst_n_async) begin
+        if (!S_rst_n_async)
+            S_rst50_sync <= 2'b00;
+        else
+            S_rst50_sync <= {S_rst50_sync[0], 1'b1};
+    end
+    wire S_rst_50 = ~S_rst50_sync[1];
 
     // pixel domain (25 MHz)
     reg [1:0] S_rst_pix_sync;
@@ -560,7 +579,10 @@ module m4_top #(
         .O_uart_tx (S_dbg_tx)
     );
 
-    assign uart_tx = S_dbg_tx;
+    // I2C scanner debug build: its ASCII report replaces the FAT dumper
+    wire S_scan_busy, S_scan_done, S_scan_any, S_scan_codec, S_scan_uart;
+
+    assign uart_tx = (DEBUG_AUDIO == 2) ? S_scan_uart : S_dbg_tx;
 
     assign S_st_has_img = (S_fat_count != 5'd0);
 
@@ -603,25 +625,58 @@ module m4_top #(
     wire S_rst_mclk = ~S_rst_mclk_sync[1];
 
     //-------------------------------------------------------------------------
-    // WM8960 I2C initialisation (50 MHz domain, 40 kHz SCL, 13 registers)
+    // codec I2C path : either the ES8388/WM8960 initialiser (normal builds) or
+    // the I2C bus scanner (DEBUG_AUDIO == 2 bring-up build)
     //-------------------------------------------------------------------------
     wire       S_init_busy, S_init_done, S_init_ok, S_init_nack;
     wire [4:0] S_init_idx;
     wire       S_scl_o, S_sda_o, S_sda_oe, S_sda_i;
 
-    m4_i2s_init_dev u_i2c_init (
-        .I_clk     (clk),
-        .I_rst     (S_rst_i2c),
-        .O_busy    (S_init_busy),
-        .O_done    (S_init_done),
-        .O_ok      (S_init_ok),
-        .O_nack_err(S_init_nack),
-        .O_index   (S_init_idx),
-        .O_scl     (S_scl_o),
-        .O_sda_o   (S_sda_o),
-        .O_sda_oe  (S_sda_oe),
-        .I_sda_i   (S_sda_i)
-    );
+    generate
+    if (DEBUG_AUDIO == 2) begin : g_i2c_scan
+        m4_i2c_scan #(
+            .CLK_HZ (50_000_000),
+            .BAUD   (115200)
+        ) u_i2c_scan (
+            .I_clk       (clk),
+            .I_rst       (S_rst_50),
+            .O_scl       (S_scl_o),
+            .O_sda_o     (S_sda_o),
+            .O_sda_oe    (S_sda_oe),
+            .I_sda_i     (S_sda_i),
+            .O_uart_tx   (S_scan_uart),
+            .O_busy      (S_scan_busy),
+            .O_done      (S_scan_done),
+            .O_any_ack   (S_scan_any),
+            .O_codec_ack (S_scan_codec)
+        );
+        // the initialiser is not built, so its status is constant
+        assign S_init_busy = 1'b0;
+        assign S_init_done = 1'b0;
+        assign S_init_ok   = 1'b0;
+        assign S_init_nack = 1'b0;
+        assign S_init_idx  = 5'd0;
+    end else begin : g_i2c_init
+        m4_i2s_init_dev u_i2c_init (
+            .I_clk     (clk),
+            .I_rst     (S_rst_i2c),
+            .O_busy    (S_init_busy),
+            .O_done    (S_init_done),
+            .O_ok      (S_init_ok),
+            .O_nack_err(S_init_nack),
+            .O_index   (S_init_idx),
+            .O_scl     (S_scl_o),
+            .O_sda_o   (S_sda_o),
+            .O_sda_oe  (S_sda_oe),
+            .I_sda_i   (S_sda_i)
+        );
+        assign S_scan_busy  = 1'b0;
+        assign S_scan_done  = 1'b0;
+        assign S_scan_any   = 1'b0;
+        assign S_scan_codec = 1'b0;
+        assign S_scan_uart  = 1'b0;
+    end
+    endgenerate
 
     // shared I2C bus : push-pull SCL, tri-state SDA (same idea as the vendor
     // src/function_pin.v, but M4 owns the bus for good - the EEPROM and the RTC
@@ -669,8 +724,7 @@ module m4_top #(
         .O_mclk  (I2S_MCLK),
         .O_bclk  (I2S_BCLK),
         .O_lrck  (I2S_DACLRC),
-        .O_dacdat(I2S_DACDAT),
-        .O_adclrc(I2S_ADCLRC)
+        .O_dacdat(I2S_DACDAT)
     );
 
     //-------------------------------------------------------------------------
@@ -687,7 +741,10 @@ module m4_top #(
         else
             S_led <= {S_disp_page, (S_fat_err != 3'd0), S_wr_busy, S_fat_mounted};
     end
-    assign led = DEBUG_ERR ? {1'b1, ~S_fat_err} : S_led;
+    assign led = (DEBUG_AUDIO == 2) ? {~S_scan_done, ~S_scan_any, ~S_scan_codec, ~S_scan_busy}
+               : DEBUG_AUDIO        ? {~S_audio_lock, ~S_init_ok, ~S_init_nack, ~S_init_busy}
+               : DEBUG_ERR          ? {1'b1, ~S_fat_err}
+               :                      S_led;
 
     //-------------------------------------------------------------------------
     // HDMI 1.4b transmitter core (encrypted IP, vendor supplied)

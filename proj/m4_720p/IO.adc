@@ -33,11 +33,21 @@ set_pin_assignment	{ SEG7_SCLK }	{ LOCATION = T14; IOSTANDARD = LVCMOS33; DRIVES
 set_pin_assignment	{ SEG7_RCLK }	{ LOCATION = R12; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
 set_pin_assignment	{ SEG7_DIO }	{ LOCATION = R14; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
 
+# Audio : the AC201-240515 baseboard carries an ES8388 (not a WM8960), and the
+# AC601 core board schematic (U1 = EG4S20) routes the five codec signals to:
+#   core pin 96  = B8 = ES_MCLK   (codec pin 1  MCLK)
+#   core pin 97  = C8 = ES_DSCLK  (codec pin 5  SCLK)   <- FPGA bit clock
+#   core pin 98  = A8 = ES_DSDIN  (codec pin 6  DSDIN)  <- FPGA DAC data
+#   core pin 101 = A7 = ES_DLCLK  (codec pin 7  LRCK)   <- FPGA frame clock
+#   core pin 102 = C7 = ES_ASDOUT (codec pin 8  ASDOUT) <- codec ADC out, unused
+# The pin table calls A8 "I2S_DACLRC" and A7 "I2S_DACDAT" (it was written for a
+# WM8960 variant), which is the opposite of the core board schematic.  The
+# schematic wins: LRCK is A7, DACDAT is A8.  C7 is a codec OUTPUT and must not
+# be driven by the FPGA, so it is not constrained at all.
 set_pin_assignment	{ I2S_MCLK }	{ LOCATION = B8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
 set_pin_assignment	{ I2S_BCLK }	{ LOCATION = C8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
-set_pin_assignment	{ I2S_DACLRC }	{ LOCATION = A8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
-set_pin_assignment	{ I2S_DACDAT }	{ LOCATION = A7; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
-set_pin_assignment	{ I2S_ADCLRC }	{ LOCATION = C7; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ I2S_DACLRC }	{ LOCATION = A7; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
+set_pin_assignment	{ I2S_DACDAT }	{ LOCATION = A8; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = NONE; }
 set_pin_assignment	{ I2C_SCL }	{ LOCATION = L16; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = PULLUP; }
 set_pin_assignment	{ I2C_SDA }	{ LOCATION = M16; IOSTANDARD = LVCMOS33; DRIVESTRENGTH = 8; PULLTYPE = PULLUP; }
 

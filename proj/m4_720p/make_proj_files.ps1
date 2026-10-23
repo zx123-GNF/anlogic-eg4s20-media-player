@@ -41,6 +41,7 @@ $files = @(
  'rtl/hdmi1.4b_transmitter_core/hdmi_1_4b_transmitter_core_wrapper.enc.v',
  'al_ip/pll_hdmi_720p/pll_hdmi_720p.v',
  'rtl/m4_dbg_uart.v',
+ 'rtl/m4_i2c_scan.v',
  'rtl/m4_i2s_bit_shift.v',
  'rtl/m4_i2s_control.v',
  'rtl/m4_i2s_init_dev.v',

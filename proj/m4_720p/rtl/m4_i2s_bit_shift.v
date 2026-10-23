@@ -75,6 +75,20 @@ module m4_i2s_bit_shift #(
     reg [1:0] S_st;
     reg [1:0] S_ph;         // 0..3 phase inside one SCL period
     reg [3:0] S_bit;        // 0..7 data bits, 8 = ACK
+    reg       S_hold;       // 1 = inside a frame, between two bytes : SCL held LOW
+
+    // THE multi byte bug (found with the I2C bus scanner, 2026-10-23)
+    // ---------------------------------------------------------------
+    // A register write on the WM8960 is three bytes in ONE frame
+    // (dev, reg+data8, data7:0).  After the ACK bit of a byte that is not the
+    // last one this engine returned to the idle branch, which drives SCL = 1.
+    // SCL was low at the end of the ACK phase, so the slave saw an extra rising
+    // edge with SDA released (high) between every two bytes: the second and
+    // third byte arrived one bit shifted and were refused -> NACK, "codec not
+    // answering" - while a single byte probe (the scanner) worked fine.
+    // Fix: keep SCL low between the bytes of a frame (S_hold), exactly like a
+    // master that stretches the clock while it prepares the next byte.  The bus
+    // only returns to the idle-high state after a STOP or an abort.
 
     always @(posedge I_clk) begin
         if (I_rst) begin
@@ -82,6 +96,7 @@ module m4_i2s_bit_shift #(
             S_ph      <= 2'd0;
             S_bit     <= 4'd0;
             S_busy    <= 1'b0;
+            S_hold    <= 1'b0;
             O_scl     <= 1'b1;
             O_sda_o   <= 1'b1;
             O_sda_oe  <= 1'b0;
@@ -93,15 +108,25 @@ module m4_i2s_bit_shift #(
             O_done <= 1'b0;
 
             if (!S_busy) begin
-                //--------------------------------------------- bus idle
-                O_scl    <= 1'b1;
-                O_sda_oe <= 1'b0;
-                O_sda_o  <= 1'b1;
+                //--------------------------------------------- bus idle / hold
+                // S_hold : still inside a frame, waiting for the next byte.
+                // Keep SCL LOW (no extra clock edge!) and SDA released.
+                if (S_hold) begin
+                    O_scl    <= 1'b0;
+                    O_sda_oe <= 1'b0;
+                    O_sda_o  <= 1'b1;
+                end
+                else begin
+                    O_scl    <= 1'b1;
+                    O_sda_oe <= 1'b0;
+                    O_sda_o  <= 1'b1;
+                end
                 if (I_go) begin
                     S_busy <= 1'b1;
                     S_ph   <= 2'd0;
                     S_bit  <= 4'd0;
                     O_nack <= 1'b0;
+                    S_hold <= 1'b0;
                     if (I_cmd[0])
                         S_st <= C_START;
                     else if (I_cmd[1])
@@ -168,11 +193,17 @@ module m4_i2s_bit_shift #(
                         S_ph <= 2'd0;
                         if (S_bit == 4'd8) begin
                             if (I_cmd[2]) begin
-                                S_st <= C_STOP;
+                                S_st   <= C_STOP;
+                                S_hold <= 1'b0;
                             end
                             else begin
+                                // end of a byte that is not the last one of the
+                                // frame : hold SCL low until the next I_go
                                 S_busy <= 1'b0;
                                 O_done <= 1'b1;
+                                S_hold <= 1'b1;
+                                O_scl  <= 1'b0;
+                                O_sda_oe <= 1'b0;
                             end
                         end
                         else begin
@@ -197,6 +228,7 @@ module m4_i2s_bit_shift #(
                     if (S_ph == 2'd3) begin
                         S_ph   <= 2'd0;
                         S_busy <= 1'b0;
+                        S_hold <= 1'b0;
                         O_done <= 1'b1;
                     end
                     else

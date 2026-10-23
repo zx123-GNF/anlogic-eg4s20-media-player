@@ -40,11 +40,10 @@ module m4_i2s_tx (
     input  wire [15:0] I_sample,    // current 16 bit sample (both channels)
     output reg         O_tick,      // 1 cycle pulse at the frame start
 
-    output wire        O_mclk,      // to WM8960 MCLK
-    output reg         O_bclk,
-    output reg         O_lrck,
-    output reg         O_dacdat,
-    output reg         O_adclrc
+    output wire        O_mclk,      // to codec MCLK   (B8)
+    output reg         O_bclk,      // to codec SCLK   (C8)
+    output reg         O_lrck,      // to codec LRCK   (A7)
+    output reg         O_dacdat     // to codec DSDIN  (A8)
 );
 
     assign O_mclk = I_clk;
@@ -71,7 +70,6 @@ module m4_i2s_tx (
             S_sr     <= 16'd0;
             O_bclk   <= 1'b0;
             O_lrck   <= 1'b0;
-            O_adclrc <= 1'b0;
             O_dacdat <= 1'b0;
             O_tick   <= 1'b0;
         end
@@ -84,7 +82,6 @@ module m4_i2s_tx (
                 O_bclk   <= 1'b0;
                 S_slot   <= S_nslot;
                 O_lrck   <= S_nslot[5];
-                O_adclrc <= S_nslot[5];
                 O_dacdat <= I_en ? S_bitv : 1'b0;
 
                 if (S_nslot == 6'd0) begin
