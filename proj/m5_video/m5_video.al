@@ -314,7 +314,7 @@
                     <Attr Name="CompileOrder" Val="38"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/m5_sine_rom.v">
+            <File Path="rtl/m5_aud_fifo.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -322,7 +322,7 @@
                     <Attr Name="CompileOrder" Val="39"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/m5_sine_tone.v">
+            <File Path="rtl/m5_audio_acr.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -330,7 +330,7 @@
                     <Attr Name="CompileOrder" Val="40"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/m5_wm8960_table.v">
+            <File Path="rtl/m5_sine_rom.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -338,7 +338,7 @@
                     <Attr Name="CompileOrder" Val="41"/>
                 </FileInfo>
             </File>
-            <File Path="al_ip/pll_m5_audio/pll_m5_audio.v">
+            <File Path="rtl/m5_sine_tone.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -346,7 +346,7 @@
                     <Attr Name="CompileOrder" Val="42"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/HEX8.v">
+            <File Path="rtl/m5_wm8960_table.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -354,7 +354,7 @@
                     <Attr Name="CompileOrder" Val="43"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/HC595_Driver.v">
+            <File Path="al_ip/pll_m5_audio/pll_m5_audio.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -362,7 +362,7 @@
                     <Attr Name="CompileOrder" Val="44"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/m5_hex_status.v">
+            <File Path="rtl/HEX8.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
@@ -370,12 +370,28 @@
                     <Attr Name="CompileOrder" Val="45"/>
                 </FileInfo>
             </File>
-            <File Path="rtl/m5_top.v">
+            <File Path="rtl/HC595_Driver.v">
                 <FileInfo>
                     <Attr Name="UsedInSyn" Val="true"/>
                     <Attr Name="UsedInP&R" Val="true"/>
                     <Attr Name="BelongTo" Val="design_1"/>
                     <Attr Name="CompileOrder" Val="46"/>
+                </FileInfo>
+            </File>
+            <File Path="rtl/m5_hex_status.v">
+                <FileInfo>
+                    <Attr Name="UsedInSyn" Val="true"/>
+                    <Attr Name="UsedInP&R" Val="true"/>
+                    <Attr Name="BelongTo" Val="design_1"/>
+                    <Attr Name="CompileOrder" Val="47"/>
+                </FileInfo>
+            </File>
+            <File Path="rtl/m5_top.v">
+                <FileInfo>
+                    <Attr Name="UsedInSyn" Val="true"/>
+                    <Attr Name="UsedInP&R" Val="true"/>
+                    <Attr Name="BelongTo" Val="design_1"/>
+                    <Attr Name="CompileOrder" Val="48"/>
                 </FileInfo>
             </File>
         </Verilog>

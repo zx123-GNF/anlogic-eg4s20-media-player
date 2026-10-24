@@ -56,9 +56,13 @@ module m5_top #(
     //   DEBUG_AUDIO = 0 : normal play/status LEDs (release build)
     // bring-up: show the stream debug word (bps, partition type, error, failure
     // state) on all eight 7 segment digits instead of E<n>
-    parameter DEBUG_STREAM = 1,
+    parameter DEBUG_STREAM = 0,
     parameter DEBUG_AUDIO  = 0,
-    parameter DEBUG_ERR    = 0
+    parameter DEBUG_ERR    = 0,
+    // HDMI audio bring-up test: 1 = send a clean 1 kHz tone instead of the
+    // decoded soundtrack, so the HDMI audio packet path and the sink can be
+    // validated independently of the decoder / FIFO data.
+    parameter HDMI_TONE    = 0
 ) (
     input  wire clk,            // 50 MHz, K14
     input  wire rst_n,          // KEY2, H14, low active
@@ -383,7 +387,11 @@ module m5_top #(
     wire [31:0] S_dbg_chk;
     wire [31:0] S_dbg_mclus, S_dbg_flba, S_dbg_fat0;
     wire [7:0]  S_dbg_b0;
-    wire [31:0] S_dbg_mclus, S_dbg_flba;
+
+    // video decoder bring-up counters (m5_vdec)
+    wire [31:0] S_dbg_vbyt, S_dbg_vpx, S_dbg_vlen, S_dbg_endv;
+    wire [31:0] S_dbg_hdrb, S_dbg_raw32, S_dbg_rawh;
+    wire [15:0] S_dbg_audn;
 
     //-------------------------------------------------------------------------
     // SD SPI engine + sector buffer (100 MHz)
@@ -491,7 +499,16 @@ module m5_top #(
         .O_err         (S_vdec_err),
 
         .O_aud_we      (S_aud_we),
-        .O_aud_data    (S_aud_data)
+        .O_aud_data    (S_aud_data),
+
+        .O_dbg_vbyt    (S_dbg_vbyt),
+        .O_dbg_px      (S_dbg_vpx),
+        .O_dbg_audn    (S_dbg_audn),
+        .O_dbg_len     (S_dbg_vlen),
+        .O_dbg_endv    (S_dbg_endv),
+        .O_dbg_hdrb    (S_dbg_hdrb),
+        .O_dbg_raw32   (S_dbg_raw32),
+        .O_dbg_rawh    (S_dbg_rawh)
     );
 
 
@@ -510,6 +527,43 @@ module m5_top #(
     wire        S_hex_mode;
     wire [7:0]  S_hex_seg, S_hex_sel;
 
+    //  audio content check : the encoded track is a real soundtrack, so the
+    //  number of samples that are not tiny must grow quickly during playback.
+    //  A page of 0 here means the decoder emits digital silence.
+    reg [31:0] S_aud_act;
+    always @(posedge S_sdram_clk) begin
+        if (S_rst_sdram)
+            S_aud_act <= 32'd0;
+        else if (S_aud_we && (S_aud_data[15:8] != 8'h00))
+            S_aud_act <= S_aud_act + 32'd1;
+    end
+
+    //  DEBUG_STREAM = 1 : the 8 digits show packed audio bring-up words instead
+    //  of the picture counter (the CH340 UART needs a second USB cable).
+    //  Four pages, ~0.67 s each (record a 5 s video to catch all of them):
+    //    page 0 : {i2s samples written / 65536 , i2s FIFO underruns}
+    //    page 1 : {hdmi FIFO underruns         , non silent samples / 65536}
+    //    page 2 : {i2s level[13:0], hdmi level[13:0], mounted, err[2:0]}  (live)
+    //    page 3 : {i2s FIFO overruns           , hdmi FIFO overruns}
+    wire [2:0]  S_dbg_er_or = S_vdec_err | S_str_err;
+
+    reg [26:0] S_dbg_ptmr;
+    always @(posedge clk) begin
+        if (~S_rst_n_async) S_dbg_ptmr <= 27'd0;
+        else                S_dbg_ptmr <= S_dbg_ptmr + 27'd1;
+    end
+    wire [1:0]  S_dbg_ppage = S_dbg_ptmr[26:25];
+    reg  [31:0] S_hex_dbg;
+    always @(*) begin
+        case (S_dbg_ppage)
+            2'd0:    S_hex_dbg = {S_i2s_wcnt[31:16], S_i2s_unf[15:0]};
+            2'd1:    S_hex_dbg = {S_hdmi_unf[15:0], S_aud_act[31:16]};
+            2'd2:    S_hex_dbg = {S_i2s_lvl, S_hdmi_lvl,
+                                   S_str_mounted, S_dbg_er_or};
+            default: S_hex_dbg = {S_i2s_ovf[15:0], S_hdmi_ovf[15:0]};
+        endcase
+    end
+
     m5_hex_status u_hex_status (
         .I_clk       (clk),                 // 50 MHz display domain
         .I_rst       (~S_rst_n_async),
@@ -521,8 +575,7 @@ module m5_top #(
         .I_paused    (1'b0),
 
         .I_dbg_en    (DEBUG_STREAM),
-        .I_dbg_data  (S_dbg_chk), // ({S_dbg_bps, S_dbg_type, //
-                       {1'b0, (S_vdec_err | S_str_err)}, 2'b00, S_dbg_fail}),
+        .I_dbg_data  (S_hex_dbg),
         .O_disp_data (S_hex_data),
         .O_sw        (S_hex_sw),
         .O_mode      (S_hex_mode)
@@ -568,21 +621,16 @@ module m5_top #(
         .I_err        (S_vdec_err | S_str_err),
         .I_mnt        (S_str_mounted),
         .I_frm        (S_frame_cnt),
-        .I_spc        (S_dbg_spc),
-        .I_mclus      (S_dbg_mclus),
-        .I_flba       (S_dbg_flba),
-        .I_fat0       (S_dbg_fat0),
+        .I_vbyt       (S_dbg_vbyt),
+        .I_vpx        (S_dbg_vpx),
+        .I_audn       (S_dbg_audn),
+        .I_len        (S_dbg_vlen),
+        .I_byt        (S_dbg_byt),
         .I_chk        (S_dbg_chk),
-        .I_b0         (S_dbg_b0),
-        .I_data_lba   (S_dbg_data),
-        .I_fat_lba    (S_dbg_fat),
-        .I_first_clus (S_dbg_first),
-        .I_clus       (S_dbg_clus),
+        .I_first      (S_dbg_first),
         .I_lba        (S_dbg_lba),
         .I_size       (S_dbg_size),
-        .I_byt        (S_dbg_byt),
-        .I_fail       (S_dbg_fail),
-        .I_secin      (S_dbg_secin),
+        .I_eof        (S_vfile_eof),
         .O_uart_tx    (S_dbg_tx)
     );
 
@@ -693,7 +741,7 @@ module m5_top #(
     assign S_sda_i = I2C_SDA;
 
     //-------------------------------------------------------------------------
-    // init_ok -> MCLK domain (2FF); the tone only runs when every register ACKed
+    // init_ok -> MCLK domain (2FF); the DAC only opens when every register ACKed
     //-------------------------------------------------------------------------
     reg [1:0] S_ok_sync;
     always @(posedge S_mclk or negedge S_rst_n_audio) begin
@@ -702,20 +750,35 @@ module m5_top #(
         else
             S_ok_sync <= {S_ok_sync[0], S_init_ok};
     end
-    wire S_tone_en = S_ok_sync[1];
+    wire S_aud_en = S_ok_sync[1];
 
     //-------------------------------------------------------------------------
-    // 1 kHz sine, 48 kHz sample rate, 16 bit, -6.02 dBFS (design doc §8)
+    // 48 kHz mono audio of the video frames : asynchronous FIFO from the
+    // 100 MHz decode domain into the 12.288 MHz MCLK domain
     //-------------------------------------------------------------------------
-    wire [15:0] S_tone_sample;
-    wire        S_tone_tick;
+    wire [15:0] S_aud_sample;
+    wire        S_aud_tick;
 
-    m5_sine_tone u_tone (
-        .I_clk   (S_mclk),
-        .I_rst   (S_rst_mclk),
-        .I_tick  (S_tone_tick),
-        .I_en    (S_tone_en),
-        .O_sample(S_tone_sample)
+    // bring-up counters of the two audio FIFOs
+    wire [31:0] S_i2s_wcnt, S_i2s_ovf, S_i2s_unf;
+    wire [13:0] S_i2s_lvl;
+    wire [31:0] S_hdmi_wcnt, S_hdmi_ovf, S_hdmi_unf;
+    wire [13:0] S_hdmi_lvl;
+
+    m5_aud_fifo u_aud_fifo (
+        .I_wclk   (S_sdram_clk),
+        .I_wrst   (S_rst_sdram),
+        .I_we     (S_aud_we),
+        .I_wdata  (S_aud_data),
+        .O_wlevel (S_i2s_lvl),
+        .O_wr_cnt (S_i2s_wcnt),
+        .O_ovf_cnt(S_i2s_ovf),
+
+        .I_rclk   (S_mclk),
+        .I_rrst   (S_rst_mclk),
+        .I_rd     (S_aud_tick),
+        .O_rdata  (S_aud_sample),
+        .O_unf_cnt(S_i2s_unf)
     );
 
     //-------------------------------------------------------------------------
@@ -725,9 +788,9 @@ module m5_top #(
     m5_i2s_tx u_i2s_tx (
         .I_clk   (S_mclk),
         .I_rst   (S_rst_mclk),
-        .I_en    (S_tone_en),
-        .I_sample(S_tone_sample),
-        .O_tick  (S_tone_tick),
+        .I_en    (S_aud_en),
+        .I_sample(S_aud_sample),
+        .O_tick  (S_aud_tick),
         .O_mclk  (I2S_MCLK),
         .O_bclk  (I2S_BCLK),
         .O_lrck  (I2S_DACLRC),
@@ -746,12 +809,86 @@ module m5_top #(
         if (S_rst_sdram)
             S_led <= 4'b0000;
         else
-            S_led <= {S_disp_page, ((S_vdec_err | S_str_err) != 3'd0), S_vdec_busy, S_str_mounted};
+            //  release status LEDs (lit = condition true, leds are active low):
+            //    led0 : TF card mounted / FAT32 BPB accepted
+            //    led1 : an error was reported by the streamer or the decoder
+            //    led2 : a video frame is being decoded / written
+            //    led3 : HDMI audio samples are flowing to the monitor
+            S_led <= {(S_hdmi_lvl > 14'd256),
+                      ((S_vdec_err | S_str_err) != 3'd0),
+                      S_vdec_busy, S_str_mounted};
     end
     assign led = (DEBUG_AUDIO == 2) ? {~S_scan_done, ~S_scan_any, ~S_scan_codec, ~S_scan_busy}
                : DEBUG_AUDIO        ? {~S_audio_lock, ~S_init_ok, ~S_init_nack, ~S_init_busy}
                : DEBUG_ERR          ? {1'b1, (S_str_err != 3'd0), (S_vdec_err != 3'd0), S_str_mounted}
-               :                      S_led;
+               :                      ~S_led;   // LEDs are active low : lit = 1
+
+    //=========================================================================
+    // HDMI embedded audio : the decoded 48 kHz mono samples are also pushed
+    // into a second FIFO that is read in the PIXEL clock domain and handed to
+    // the encrypted HDMI core together with the ACR packets, so the monitor can
+    // play the sound through its own speaker (HDMI LPCM 2 ch).
+    //
+    // 48 kHz sample strobe from the 73.333333 MHz pixel clock : fractional
+    // accumulator, step = round(48000 * 2^32 / 73333333) = 2811250
+    //   -> 2811250 / 2^32 * 73.333333 MHz = 47.9999 kHz
+    //=========================================================================
+    // 32 bit phase accumulator that wraps at 2^32, so bit 32 of the sum is a
+    // clean ONE CYCLE pulse at 47.9999 kHz (a 33 bit accumulator would leave the
+    // tick high for half of the cycles - that was the first, broken version).
+    reg  [31:0] S_aph;
+    wire [32:0] S_aph_nx = {1'b0, S_aph} + 33'd2811250;
+
+    always @(posedge S_pixel_clk) begin
+        if (S_rst_pixel) S_aph <= 32'd0;
+        else             S_aph <= S_aph_nx[31:0];
+    end
+    wire S_aud48 = S_aph_nx[32];        // one pixel clock pulse per sample
+
+    wire [15:0] S_hdmi_sample;
+    wire        S_acr_valid;
+    wire [19:0] S_acr_cts, S_acr_n;
+
+    m5_aud_fifo #(
+        .AW (12)                        // 4096 samples = 85 ms
+    ) u_hdmi_aud_fifo (
+        .I_wclk   (S_sdram_clk),
+        .I_wrst   (S_rst_sdram),
+        .I_we     (S_aud_we),
+        .I_wdata  (S_aud_data),
+        .O_wlevel (S_hdmi_lvl),
+        .O_wr_cnt (S_hdmi_wcnt),
+        .O_ovf_cnt(S_hdmi_ovf),
+
+        .I_rclk   (S_pixel_clk),
+        .I_rrst   (S_rst_pixel),
+        .I_rd     (S_aud48),
+        .O_rdata  (S_hdmi_sample),
+        .O_unf_cnt(S_hdmi_unf)
+    );
+
+    // audio source of the HDMI link : decoded soundtrack (normal) or a clean
+    // 1 kHz test tone (HDMI_TONE = 1, bring-up)
+    wire [15:0] S_hdmi_tone;
+    m5_sine_tone u_hdmi_tone (
+        .I_clk   (S_pixel_clk),
+        .I_rst   (S_rst_pixel),
+        .I_tick  (S_aud48),
+        .I_en    (1'b1),
+        .O_sample(S_hdmi_tone)
+    );
+    wire [15:0] S_hdmi_src = HDMI_TONE ? S_hdmi_tone : S_hdmi_sample;
+
+    m5_audio_acr #(
+        .ACR_N (6144)                   // N for 48 kHz
+    ) u_hdmi_acr (
+        .I_clk         (S_pixel_clk),
+        .I_rst         (S_rst_pixel),
+        .I_audio_valid (S_aud48),
+        .O_acr_valid   (S_acr_valid),
+        .O_acr_cts     (S_acr_cts),
+        .O_acr_n       (S_acr_n)
+    );
 
     //-------------------------------------------------------------------------
     // HDMI 1.4b transmitter core (encrypted IP, vendor supplied)
@@ -795,12 +932,12 @@ module m5_top #(
         .I_axis_s_last      (S_axis_last),
         .I_axis_s_data      (S_axis_data),
         .O_axis_s_ready     (S_axis_ready),
-        .I_audio_valid      (1'b0),
-        .I_audio_left_data  (24'd0),
-        .I_audio_right_data (24'd0),
-        .I_acr_valid        (1'b0),
-        .I_acr_cts          (20'd0),
-        .I_acr_n            (20'd0),
+        .I_audio_valid      (S_aud48),
+        .I_audio_left_data  ({S_hdmi_src, 8'h00}),
+        .I_audio_right_data ({S_hdmi_src, 8'h00}),
+        .I_acr_valid        (S_acr_valid),
+        .I_acr_cts          (S_acr_cts),
+        .I_acr_n            (S_acr_n),
         .O_video_locked     (S_video_locked_unused),
         .O_ddc_scl          (S_ddc_scl_unused),
         .IO_ddc_sda         (S_ddc_sda_unused),

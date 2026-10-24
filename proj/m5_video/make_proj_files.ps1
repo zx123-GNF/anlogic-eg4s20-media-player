@@ -43,6 +43,8 @@ $files = @(
  'rtl/m5_i2s_control.v',
  'rtl/m5_i2s_init_dev.v',
  'rtl/m5_i2s_tx.v',
+ 'rtl/m5_aud_fifo.v',
+ 'rtl/m5_audio_acr.v',
  'rtl/m5_sine_rom.v',
  'rtl/m5_sine_tone.v',
  'rtl/m5_wm8960_table.v',

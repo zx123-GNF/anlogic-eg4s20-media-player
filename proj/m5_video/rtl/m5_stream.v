@@ -298,6 +298,11 @@ module m5_stream #(
     reg [3:0]  S_retry;
 
     reg [31:0] S_part_lba, S_fat_lba, S_data_lba, S_root_clus;
+    //  cluster-2 is kept in its own register (S_clus_m2 / S_root_m2) so that
+    //  the multiply stage only sees a registered operand: "reg -> -2 -> *spc"
+    //  in one clock was a 10.5 ns path (SWNS -0.839 ns, begin point
+    //  S_root_clus, end point the multiplier inputs).
+    reg [31:0] S_clus_m2, S_root_m2;
     //  pipelined sector LBA: (cluster-2)*spc is a 32 bit multiply, so it is
     //  registered in its own stage; the address adder is the second stage.
     //  Without this the O_sd_lba path was 12.2 ns (SWNS -2.489 ns).
@@ -326,8 +331,8 @@ module m5_stream #(
     reg  [1:0] S_by_st;             // streaming byte read: 0 idle, 1 addr, 2 capture
 
     //  staged: the multiply is registered on its own, the add on the next
-    wire [31:0] S_cl_off_w = (S_clus - 32'd2) * {23'd0, S_spc};
-    wire [31:0] S_rt_off_w = (S_root_clus - 32'd2) * {23'd0, S_spc};
+    wire [31:0] S_cl_off_w = S_clus_m2 * {23'd0, S_spc};
+    wire [31:0] S_rt_off_w = S_root_m2 * {23'd0, S_spc};
     wire [8:0]  S_entry_off = {S_dir_i[3:0], 5'b0};              // dir entry * 32
     wire [8:0]  S_name_off  = S_entry_off + {4'd0, S_name_i};
     wire [8:0]  S_fat_off   = {S_clus[6:0], 2'b0};               // (clus&127)*4
@@ -389,11 +394,13 @@ module m5_stream #(
             S_fat_lba    <= 32'd0;
             S_data_lba   <= 32'd0;
             S_root_clus  <= 32'd0;
+            S_root_m2    <= 32'd0;
             S_spc        <= 8'd1;
             S_nfat       <= 8'd1;
             S_rsvd       <= 16'd0;
             S_fatsz      <= 32'd0;
             S_clus       <= 32'd0;
+            S_clus_m2    <= 32'd0;
             S_first_clus <= 32'd0;
             S_file_size  <= 32'd0;
             S_bytes      <= 32'd0;
@@ -574,6 +581,7 @@ module m5_stream #(
             T_ROOTC_W: begin
                 if (S_fdone) begin
                     S_root_clus <= S_fval;
+                    S_root_m2   <= S_fval - 32'd2;
                     S_clus      <= S_fval;
                     S_sec_in    <= 9'd0;
                     S_st        <= T_ROOT_PRE;
@@ -662,6 +670,7 @@ module m5_stream #(
                     if (S_name_ok && (S_fval != 32'd0)) begin
                         S_file_size <= S_fval;
                         S_clus      <= S_first_clus;
+                        S_clus_m2   <= S_first_clus - 32'd2;
                         S_dbg_mclus <= S_first_clus;
                         S_lin_cnt   <= (S_fval + 32'd511) >> 9;
                         S_lin_tot   <= (S_fval + 32'd511) >> 9;
@@ -805,6 +814,7 @@ module m5_stream #(
                         S_st <= T_LOOP;
                     else begin
                         S_clus <= S_fval;
+                        S_clus_m2 <= S_fval - 32'd2;
                         S_st   <= T_ST_PRE;
                     end
                 end
@@ -816,6 +826,7 @@ module m5_stream #(
                 S_lin_lba  <= 32'd0;
                 S_lin_cnt  <= S_lin_tot;
                 S_clus    <= S_first_clus;
+                S_clus_m2 <= S_first_clus - 32'd2;
                 S_sec_in  <= 9'd0;
                 S_bytes   <= 32'd0;
                 S_st      <= T_ST_PRE;
