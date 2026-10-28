@@ -131,7 +131,12 @@ module m6_vdec #(
     reg  [9:0] S_tx;                // output pixel index 0..639
     reg        S_pass;              // the source row is written twice
     reg  [7:0] S_pix;               // pixel of a repeat token
-    reg  [11:0] S_left;             // pixels still to write for this token
+    //  M6 fix: a token may carry up to 4096 pixels, which does NOT fit in    
+    //  12 bits (the token field is count-1, 0..4095, so the pixel count is up to 
+    //  4096).  With 12 bits a 4096 pixel token wrapped to 0 and the decoder wrote
+    //  one pixel / consumed one byte too few per token: literals then left the    
+    //  RLE stream itself misaligned (sheared picture).  M5's clip never hit it.  
+    reg  [12:0] S_left;             // pixels still to write for this token
     reg        S_rep;               // 1 = repeat token, 0 = literal
     reg  [15:0] S_tok;
     reg  [7:0] S_aud_hi;
@@ -280,7 +285,7 @@ module m6_vdec #(
             S_aud_lo     <= 1'b0;
             S_aud_hi     <= 8'd0;
             S_pix        <= 8'd0;
-            S_left       <= 12'd0;
+            S_left       <= 13'd0;
             S_rep        <= 1'b0;
             S_tok        <= 16'd0;
             S_x          <= 9'd0;
@@ -455,7 +460,7 @@ module m6_vdec #(
                     if (!S_endv_cap) begin S_endv <= S_vbyt_nx; S_endv_cap <= 1'b1; end
                     S_st <= (S_aud_n != 16'd0) ? V_AUDIO : V_DONE;
                 end else begin
-                    S_left <= S_cnt + 12'd1;
+                    S_left <= {1'b0, S_cnt} + 13'd1;
                     S_rep  <= (S_tok[15:12] == 4'd1);
                     S_st   <= (S_tok[15:12] == 4'd1) ? V_REPPIX : V_WRITE;
                 end
@@ -480,13 +485,13 @@ module m6_vdec #(
                     S_row[S_x] <= S_pix;
                     S_px       <= S_px + 32'd1;
                     S_x        <= S_x + 9'd1;
-                    S_left     <= S_left - 12'd1;
+                    S_left     <= S_left - 13'd1;
                     if (S_x == 9'd319) begin
                         S_x    <= 9'd0;
                         S_tx   <= 10'd0;
                         S_pass <= 1'b0;
                         S_st   <= V_EMIT;
-                    end else if (S_left == 12'd1) begin
+                    end else if (S_left == 13'd1) begin
                         S_st <= V_TOKEN0;
                     end
                 end else begin
@@ -494,13 +499,13 @@ module m6_vdec #(
                         S_row[S_x] <= I_byte;
                         S_px       <= S_px + 32'd1;
                         S_x        <= S_x + 9'd1;
-                        S_left     <= S_left - 12'd1;
+                        S_left     <= S_left - 13'd1;
                         if (S_x == 9'd319) begin
                             S_x    <= 9'd0;
                             S_tx   <= 10'd0;
                             S_pass <= 1'b0;
                             S_st   <= V_EMIT;
-                        end else if (S_left == 12'd1) begin
+                        end else if (S_left == 13'd1) begin
                             S_st <= V_TOKEN0;
                         end
                     end
@@ -516,7 +521,7 @@ module m6_vdec #(
                         else begin
                             S_pass <= 1'b0;
                             S_rows <= S_rows + 9'd1;
-                            S_st   <= (S_left != 12'd0) ? V_WRITE : V_TOKEN0;
+                            S_st   <= (S_left != 13'd0) ? V_WRITE : V_TOKEN0;
                         end
                     end else
                         S_tx <= S_tx + 10'd1;

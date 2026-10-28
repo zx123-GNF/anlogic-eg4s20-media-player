@@ -115,6 +115,7 @@ module m6_fat #(
     output wire         O_buf_sel,     // 1 = the pixel pump owns the buffer port
     output wire [5:0]   O_dbg_st,      // debug: current FSM state (UART dumper)
     output wire [7:0]   O_dbg_ck,      // debug: BPB checks {spc,rsvd,nfat,root,fatsz32,bps}
+    output wire [31:0]  O_dbg_info,    // debug: {current key, selections, rank}
 
     // ---- mount parameters, handed to the video streamer ---------------------
     //  m6_vstream would otherwise have to parse the BPB again; these four
@@ -189,6 +190,7 @@ module m6_fat #(
     localparam S_KEY    = 6'd42;
     localparam S_VID    = 6'd48;     // M6: a video clip owns the engine
     localparam S_VIDW   = 6'd49;     // M6: wait until the video engine is stopped
+    localparam S_VSET   = 6'd50;     // M6: let the display finish its last page swap
     localparam S_PAT0   = 6'd43;
     localparam S_PAT    = 6'd44;
     localparam S_PAT_E  = 6'd45;
@@ -237,6 +239,8 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
     reg [16:0] C_ref;           // list scan: reference key (main FSM driven)
     reg        C_mode;          // list scan: 0 = next, 1 = previous
     reg [4:0]  S_rank;          // 1 based position of the item on screen
+    reg [21:0] S_settle;        // M6: 25 ms settle counter after a clip
+    reg [7:0]  S_scan_cnt;      // M6 bring-up: how many selections were made
 
     // file list (directory order)
     reg [16:0] S_fkey  [0:MAXF-1];
@@ -350,27 +354,39 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
                     ((B[9]  == 8'h35) || (B[9]  == 8'h35)) &&
                     ((B[10] == 8'h56) || (B[10] == 8'h76));
 
-    // "IMGnnnn" : n^0x30 <= 9 is a single comparison per digit
+    //  Number part of the name: 1 to 4 decimal digits, the remaining bytes of
+    //  the 8.3 base name blank.  b^0x30 <= 9 is a single comparison per digit.
+    //  Accepting 1..3 digits as well means a file that was copied under an old
+    //  short name ("VID0.M5V", the M5 demo clip) still lands in the playlist.
     wire [7:0] W_d3 = B[3] ^ 8'h30;
     wire [7:0] W_d4 = B[4] ^ 8'h30;
     wire [7:0] W_d5 = B[5] ^ 8'h30;
     wire [7:0] W_d6 = B[6] ^ 8'h30;
 
-    wire W_e_digits = (W_d3 <= 8'd9) && (W_d4 <= 8'd9) &&
-                      (W_d5 <= 8'd9) && (W_d6 <= 8'd9);
+    wire W_dg3 = (W_d3 <= 8'd9);
+    wire W_dg4 = (W_d4 <= 8'd9);
+    wire W_dg5 = (W_d5 <= 8'd9);
+    wire W_dg6 = (W_d6 <= 8'd9);
 
-    wire W_e_img_num = (B[0] == 8'h49) && (B[1] == 8'h4D) && (B[2] == 8'h47) &&
-                       W_e_digits;
-    wire W_e_vid_num = (B[0] == 8'h56) && (B[1] == 8'h49) && (B[2] == 8'h44) &&
-                       W_e_digits;
+    wire W_n1 = W_dg3 && (B[4] == 8'h20) && (B[5] == 8'h20) && (B[6] == 8'h20);
+    wire W_n2 = W_dg3 && W_dg4      && (B[5] == 8'h20) && (B[6] == 8'h20);
+    wire W_n3 = W_dg3 && W_dg4 && W_dg5 && (B[6] == 8'h20);
+    wire W_n4 = W_dg3 && W_dg4 && W_dg5 && W_dg6;
 
-    wire W_e_isimg = W_e_img_num && W_e_bmp;
-    wire W_e_isvid = W_e_vid_num && W_e_m5v;
+    wire W_num_ok = W_n1 || W_n2 || W_n3 || W_n4;
 
-    wire [16:0] W_e_key = W_e_isvid ? {1'b1, W_d3[3:0], W_d4[3:0],
-                                            W_d5[3:0], W_d6[3:0]}
-                     : W_e_isimg ? {1'b0, W_d3[3:0], W_d4[3:0],
-                                          W_d5[3:0], W_d6[3:0]}
+    wire [15:0] W_num = W_n1 ? {12'd0, W_d3[3:0]}
+                      : W_n2 ? {8'd0,  W_d3[3:0], W_d4[3:0]}
+                      : W_n3 ? {4'd0,  W_d3[3:0], W_d4[3:0], W_d5[3:0]}
+                             : {W_d3[3:0], W_d4[3:0], W_d5[3:0], W_d6[3:0]};
+
+    wire W_e_isimg = (B[0] == 8'h49) && (B[1] == 8'h4D) && (B[2] == 8'h47) &&
+                     W_num_ok && W_e_bmp;
+    wire W_e_isvid = (B[0] == 8'h56) && (B[1] == 8'h49) && (B[2] == 8'h44) &&
+                     W_num_ok && W_e_m5v;
+
+    wire [16:0] W_e_key = W_e_isvid ? {1'b1, W_num}
+                     : W_e_isimg ? {1'b0, W_num}
                                  : 17'h1FFFF;
 
     wire W_e_add = (W_e_isimg || W_e_isvid) &&
@@ -449,6 +465,17 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
     reg  [4:0]  C_all_i;
 
     reg  [4:0]  S_count;
+    //  this entry against the two running candidates, combinationally, so the
+    //  last entry of the list is handled like every other one
+    wire        W_gt_hit  = (C_mode == 1'b0)
+                          ? ((C_rd > C_ref) && (!C_have_gt || (C_rd < C_gt)))
+                          : ((C_rd < C_ref) && (!C_have_gt || (C_rd > C_gt)));
+    wire [16:0] W_gt_v    = W_gt_hit  ? C_rd : C_gt;
+    wire [4:0]  W_gt_i    = W_gt_hit  ? C_i  : C_gt_i;
+    wire        W_all_hit = (C_mode == 1'b0) ? (!C_have_all || (C_rd < C_all))
+                                             : (!C_have_all || (C_rd > C_all));
+    wire [16:0] W_all_v   = W_all_hit ? C_rd : C_all;
+    wire [4:0]  W_all_i   = W_all_hit ? C_i  : C_all_i;
 
     // append request (driven by the main FSM, executed by the list block so
     // that the arrays and the counter always have exactly one driver)
@@ -506,36 +533,24 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
                     C_st <= 2'd2;
                 end
 
-                // keep the two best candidates
+                // keep the two best candidates.
+                //  The comparison of THIS entry must already be part of the
+                //  result when this happens to be the last entry.  M3 evaluated
+                //  the registered flags instead, so the last list entry could
+                //  never win the scan ("next" from the second to last item
+                //  silently fell back to the first one) - with a video file
+                //  sorted last that meant the clip was skipped, and the rank
+                //  counter described below never saw the real end of the list.
                 2'd2: begin
-                    if (C_mode == 1'b0) begin
-                        if ((C_rd > C_ref) && (!C_have_gt || (C_rd < C_gt))) begin
-                            C_gt      <= C_rd;
-                            C_gt_i    <= C_i;
-                            C_have_gt <= 1'b1;
-                        end
-                        if (!C_have_all || (C_rd < C_all)) begin
-                            C_all      <= C_rd;
-                            C_all_i    <= C_i;
-                            C_have_all <= 1'b1;
-                        end
-                    end else begin
-                        if ((C_rd < C_ref) && (!C_have_gt || (C_rd > C_gt))) begin
-                            C_gt      <= C_rd;
-                            C_gt_i    <= C_i;
-                            C_have_gt <= 1'b1;
-                        end
-                        if (!C_have_all || (C_rd > C_all)) begin
-                            C_all      <= C_rd;
-                            C_all_i    <= C_i;
-                            C_have_all <= 1'b1;
-                        end
-                    end
+                    C_have_gt  <= C_have_gt | W_gt_hit;
+                    C_have_all <= C_have_all | W_all_hit;
+                    if (W_gt_hit)  begin C_gt    <= C_rd; C_gt_i    <= C_i; end
+                    if (W_all_hit) begin C_all   <= C_rd; C_all_i   <= C_i; end
 
                     C_i <= C_i + 5'd1;
                     if (({1'b0, C_i} + 6'd1) >= {1'b0, S_count}) begin
-                        C_idx  <= C_have_gt ? C_gt_i : C_all_i;
-                        C_key  <= C_have_gt ? C_gt   : C_all;
+                        C_idx  <= (C_have_gt | W_gt_hit) ? W_gt_i  : W_all_i;
+                        C_key  <= (C_have_gt | W_gt_hit) ? W_gt_v  : W_all_v;
                         C_done <= 1'b1;
                         C_st   <= 2'd0;
                     end else begin
@@ -582,6 +597,7 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
     assign O_p_fat_lba  = S_fat_lba;
     assign O_p_spc      = S_spc;
     assign O_p_log2spc  = {1'b0, S_log2spc};
+    assign O_dbg_info   = {S_cur_key[16:0], S_scan_cnt, S_rank, 2'b00};
 
     assign O_pix_valid = (S_st == S_PAT) ? 1'b1 : I_pp_pix_valid;
     assign O_pix_data  = (S_st == S_PAT) ? W_pat_col : I_pp_pix_data;
@@ -622,6 +638,8 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             S_cur_key      <= 17'h1FFFF;
             S_cur_size     <= 32'd0;
             S_rank         <= 5'd0;
+            S_settle       <= 22'd0;
+            S_scan_cnt     <= 8'd0;
             O_vid_clus     <= 32'd0;
             O_vid_size     <= 32'd0;
             S_px           <= 10'd0;
@@ -936,6 +954,7 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             S_SCAN_W: begin
                 if (C_done) begin
                     S_rank     <= W_rank_nx;
+                    S_scan_cnt <= S_scan_cnt + 8'd1;
                     O_index    <= W_rank_nx - 5'd1;
                     S_cur_key  <= C_key;
                     S_cur_size <= S_fsize[C_idx];
@@ -978,6 +997,21 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
 
             S_VIDW: begin
                 if (I_vid_idle) begin
+                    S_settle <= 22'd0;
+                    S_st     <= S_VSET;
+                end
+            end
+
+            //  The clip's last page swap reaches the display through a clock
+            //  domain crossing and is executed at the NEXT frame start, so
+            //  I_disp_page / S_disp_sync are still one page behind the moment
+            //  the video engine stops.  Without this wait the BMP loader picked
+            //  the page that is about to be shown and painted the next photo
+            //  over the clip frame that is on screen (visible top-to-bottom
+            //  wipe on the bench).  25 ms > 1.5 frame periods.
+            S_VSET: begin
+                S_settle <= S_settle + 22'd1;
+                if (S_settle == 22'h2625A0) begin   // 2.5e6 clocks = 25 ms
                     C_go <= 1'b1;
                     S_st <= S_SCAN_W;
                 end

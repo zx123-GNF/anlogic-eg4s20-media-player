@@ -143,7 +143,7 @@ module m6_sd_sec (
     sd_card_control #(
         .clock_freq  (100_000_000),
         .spi_lowfreq (400_000),
-        //  M6 runs the card at 10 MHz instead of M5's 5 MHz.
+        //  M6 runs the card at 12.5 MHz instead of M5's 5 MHz.
         //
         //  WHY NOT 25 MHz (the vendor default): inside sd_card_control the
         //  spi_driver samples MISO one divided clock after SCLK moves, and at
@@ -162,7 +162,7 @@ module m6_sd_sec (
         //  If a card ever proves marginal here, change this one number back to
         //  5_000_000 and re-encode the clips at 6 fps (tools/m6_encode.py
         //  --fps 6): everything else in the design is rate agnostic.
-        .spi_highfreq(10_000_000)
+        .spi_highfreq(12_500_000)
     ) u_sd (
         .mosi        (O_sd_mosi),
         .sclk        (O_sd_clk),

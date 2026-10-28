@@ -198,47 +198,62 @@ module m6_vstream (
     //-------------------------------------------------------------------------
     // FAT entry fetch : 4 bytes little endian at S_fat_off
     //   request S_fgo -> S_fdone + S_fval
+    //
+    //  The sector buffer has a REGISTERED read port: the address is sampled one
+    //  clock after it is presented and the data is available one clock after
+    //  that, so a byte must be captured in a state that is TWO cycles after the
+    //  address state (F_IDLE sets the address, F_RD waits, F_CNT captures,
+    //  F_CAP shifts and issues the next address).  A first version of this file
+    //  captured one cycle early, so every FAT entry came back shifted / stale
+    //  and the cluster chain jumped to the wrong cluster after the first one -
+    //  the clip decoded its first cluster correctly and then filled with
+    //  whatever the wrong cluster contained (bench: frame 0 partially decoded,
+    //  then the next "frame header" read as zeros).  This is the M5 fetch
+    //  engine, verbatim.
     //-------------------------------------------------------------------------
-    reg [2:0]  S_fst;
+    localparam [1:0] F_IDLE = 2'd0, F_RD = 2'd1, F_CNT = 2'd2, F_CAP = 2'd3;
+
+    reg [1:0]  S_fst;
     reg        S_fgo;
+    reg [2:0]  S_fi;
+    reg [7:0]  S_fbyte;
     reg [31:0] S_fval;
     reg        S_fdone;
 
     always @(posedge I_clk) begin
         if (I_rst) begin
-            S_fst   <= 3'd0;
+            S_fst   <= F_IDLE;
             S_fdone <= 1'b0;
             S_fval  <= 32'd0;
             S_frd   <= 9'd0;
+            S_fi    <= 3'd0;
+            S_fbyte <= 8'd0;
         end else begin
             S_fdone <= 1'b0;
             case (S_fst)
-                3'd0: begin
+                F_IDLE: begin
                     if (S_fgo) begin
                         S_frd  <= S_fat_off;
+                        S_fi   <= 3'd0;
                         S_fval <= 32'd0;
-                        S_fst  <= 3'd1;
+                        S_fst  <= F_RD;
                     end
                 end
-                3'd1: begin
-                    S_fval[7:0] <= S_dbuf;
-                    S_frd       <= S_fat_off + 9'd1;
-                    S_fst       <= 3'd2;
-                end
-                3'd2: begin
-                    S_fval[15:8] <= S_dbuf;
-                    S_frd        <= S_fat_off + 9'd2;
-                    S_fst        <= 3'd3;
-                end
-                3'd3: begin
-                    S_fval[23:16] <= S_dbuf;
-                    S_frd         <= S_fat_off + 9'd3;
-                    S_fst         <= 3'd4;
+                F_RD: S_fst <= F_CNT;
+                F_CNT: begin
+                    S_fbyte <= S_dbuf;
+                    S_fst   <= F_CAP;
                 end
                 default: begin
-                    S_fval[31:24] <= S_dbuf;
-                    S_fdone       <= 1'b1;
-                    S_fst         <= 3'd0;
+                    S_fval <= S_fval | ({24'd0, S_fbyte} << {S_fi, 3'b000});
+                    if ((S_fi + 3'd1) == 3'd4) begin
+                        S_fdone <= 1'b1;
+                        S_fst   <= F_IDLE;
+                    end else begin
+                        S_fi   <= S_fi + 3'd1;
+                        S_frd  <= S_frd + 9'd1;
+                        S_fst  <= F_RD;
+                    end
                 end
             endcase
         end

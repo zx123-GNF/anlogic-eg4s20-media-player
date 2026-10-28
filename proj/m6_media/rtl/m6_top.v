@@ -409,6 +409,7 @@ module m6_top #(
     wire [4:0]  S_fat_count, S_fat_index;
     wire [5:0]  S_fat_st;
     wire [7:0]  S_fat_ck;
+    wire [31:0] S_fat_dbg_info;
     wire [31:0] S_fat_data_lba, S_fat_fat_lba;
     wire [7:0]  S_fat_spc;
     wire [4:0]  S_fat_log2spc;
@@ -489,6 +490,7 @@ module m6_top #(
         .O_buf_sel     (S_fat_buf_sel),
         .O_dbg_st      (S_fat_st),
         .O_dbg_ck      (S_fat_ck),
+        .O_dbg_info    (S_fat_dbg_info),
 
         .O_p_data_lba  (S_fat_data_lba),
         .O_p_fat_lba   (S_fat_fat_lba),
@@ -584,6 +586,50 @@ module m6_top #(
     assign S_rst_vid = S_rst_sdram | S_vid_rst;
     assign S_vid_idle = (S_vst == V_IDLE) && !S_vid_owner;
 
+    //-------------------------------------------------------------------------
+    // bring-up snapshot of the last clip
+    //  The failure being chased here (a clip that shows frame 0 and is gone
+    //  again ~0.1 s later) is far too short for a 0.5 s periodic debug line, so
+    //  every arm -> stop transition latches {streamer state, decoder state,
+    //  error, frame count, byte counters, reason} and the UART prints the
+    //  snapshot instead of the live values.
+    //-------------------------------------------------------------------------
+    reg [1:0]  S_clip_rsn;      // 0 = playlist walked away, 1 = clip end,
+                                // 2 = streamer error, 3 = fatal decoder error
+    reg [5:0]  D_sst, D_vst;
+    reg [2:0]  D_err;
+    reg [15:0] D_frm, D_audn;
+    reg [31:0] D_vbyt, D_px, D_len, D_byt, D_hdrb, D_raw32, D_endv;
+
+    wire S_clip_stop = (S_vst == V_RUN) &&
+                       (S_vd_clip_end || (S_vs_err3 != 3'd0) ||
+                        S_vd_fatal || !S_fat_vid_req);
+
+    always @(posedge S_sdram_clk) begin
+        if (S_rst_sdram) begin
+            S_clip_rsn <= 2'd0;
+            D_sst <= 6'd0;  D_vst <= 6'd0;  D_err <= 3'd0;
+            D_frm <= 16'd0; D_audn <= 16'd0;
+            D_vbyt <= 32'd0; D_px <= 32'd0; D_len <= 32'd0; D_byt <= 32'd0;
+            D_hdrb <= 32'd0; D_raw32 <= 32'd0; D_endv <= 32'd0;
+        end else if (S_clip_stop) begin
+            D_sst  <= S_vs_st;
+            D_vst  <= S_vd_st;
+            D_err  <= S_vd_err | S_vs_err3;
+            D_frm  <= S_vd_frm;
+            D_vbyt <= S_vdbg_vbyt;
+            D_px   <= S_vdbg_px;
+            D_len  <= S_vdbg_len;
+            D_byt  <= S_vs_byt;
+            D_audn <= S_vdbg_audn;
+            D_hdrb <= S_vdbg_hdrb;
+            D_raw32 <= S_vdbg_raw32;
+            D_endv <= S_vdbg_endv;
+            S_clip_rsn <= S_vd_clip_end        ? 2'd1 :
+                          (S_vs_err3 != 3'd0)  ? 2'd2 :
+                          S_vd_fatal           ? 2'd3 : 2'd0;
+        end
+    end
     // byte handshake, gated by the pause (freeze) and by ownership
     wire S_vb_ready = S_vd_byte_ready & ~S_paused_s & S_vid_owner;
 
@@ -892,19 +938,19 @@ module m6_top #(
     ) u_dbg (
         .I_clk        (clk),
         .I_rst        (~S_rst_n_async),
-        .I_sst        (S_vs_st),
-        .I_vst        (S_vd_st),
-        .I_err        (S_fat_err | S_vs_err3 | {2'd0, S_vd_fatal}),
+        .I_sst        (D_sst),                  // last clip, not live
+        .I_vst        (D_vst),
+        .I_err        (D_err),
         .I_mnt        (S_fat_mounted),
-        .I_frm        (S_vd_frm),
-        .I_vbyt       (S_vdbg_vbyt),
-        .I_vpx        (S_vdbg_px),
-        .I_audn       (S_vdbg_audn),
-        .I_len        (S_vdbg_len),
-        .I_byt        (S_vs_byt),
-        .I_chk        ({S_fat_count, S_fat_index, S_fat_st, 3'd0, S_fat_ck[7:0],
-                        S_vid_owner}),
-        .I_first      (S_fat_fat_lba),
+        .I_frm        (D_frm),
+        .I_vbyt       (D_vbyt),
+        .I_vpx        (D_hdrb),                // 4 bytes the decoder saw as block header
+        .I_audn       (D_endv[15:0]),          // where the frame-0 end token was
+        .I_len        (D_raw32),               // stream bytes 32..35 = frame 0 payload len
+        .I_byt        (D_byt),
+        .I_chk        ({S_fat_count, S_fat_index, S_clip_rsn, S_fat_st, 6'd0,
+                        S_fat_err, S_fat_ck[4:0]}),
+        .I_first      (S_fat_dbg_info),         // {current key, selections, rank}
         .I_lba        (S_sd_lba),
         .I_size       (S_vs_size),
         .I_eof        (S_vs_eof),
