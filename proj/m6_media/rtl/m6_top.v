@@ -501,7 +501,8 @@ module m6_top #(
         .O_vid_clus    (S_fat_vid_clus),
         .O_vid_size    (S_fat_vid_size),
         .I_vid_end     (S_vid_end),
-        .I_vid_idle    (S_vid_idle)
+        .I_vid_idle    (S_vid_idle),
+        .I_paused      (S_paused_s)
     );
 
     //-------------------------------------------------------------------------
@@ -631,7 +632,12 @@ module m6_top #(
         end
     end
     // byte handshake, gated by the pause (freeze) and by ownership
-    wire S_vb_ready = S_vd_byte_ready & ~S_paused_s & S_vid_owner;
+    //  M6: the pause no longer gates the byte stream.  Pausing means 'stop the
+    //  automatic advance' - stepping to another item with S0/S1 while paused must
+    //  still show that item, and for a clip that means it has to decode.  A clip
+    //  that reaches its end while paused holds on its last frame (m6_fat) instead
+    //  of advancing.
+    wire S_vb_ready = S_vd_byte_ready & S_vid_owner;
 
     m6_vstream u_vs (
         .I_clk         (S_sdram_clk),

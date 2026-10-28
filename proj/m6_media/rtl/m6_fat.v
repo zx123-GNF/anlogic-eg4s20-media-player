@@ -136,7 +136,8 @@ module m6_fat #(
     output reg  [31:0]  O_vid_clus,
     output reg  [31:0]  O_vid_size,
     input  wire         I_vid_end,      // 1 cycle: m6_top saw the last clip frame
-    input  wire         I_vid_idle      // 1 = the video engine is stopped
+    input  wire         I_vid_idle,     // 1 = the video engine is stopped
+    input  wire         I_paused        // 1 = the player is paused (browse mode)
 );
 
     localparam [31:0] PIX_BYTES = 32'd921600;       // 640*480*3 = 0x0E1000
@@ -241,6 +242,7 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
     reg [4:0]  S_rank;          // 1 based position of the item on screen
     reg [21:0] S_settle;        // M6: 25 ms settle counter after a clip
     reg [7:0]  S_scan_cnt;      // M6 bring-up: how many selections were made
+    reg        S_vid_hold;      // a clip ended while paused: hold its last frame
 
     // file list (directory order)
     reg [16:0] S_fkey  [0:MAXF-1];
@@ -640,6 +642,7 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             S_rank         <= 5'd0;
             S_settle       <= 22'd0;
             S_scan_cnt     <= 8'd0;
+            S_vid_hold     <= 1'b0;
             O_vid_clus     <= 32'd0;
             O_vid_size     <= 32'd0;
             S_px           <= 10'd0;
@@ -979,16 +982,21 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             //  every exit goes through S_VIDW.
             S_VID: begin
                 if (I_vid_end) begin
-                    C_mode <= 1'b0;
-                    C_ref  <= S_cur_key;
-                    S_st   <= S_VIDW;
+                    //  paused = stop advancing: keep the last frame on screen and
+                    //  wait for S0/S1 (browse).  Running (not paused) = step on.
+                    S_vid_hold <= I_paused;
+                    C_mode     <= 1'b0;
+                    C_ref      <= S_cur_key;
+                    S_st       <= S_VIDW;
                 end else if (Q_pn != 2'd0) begin
-                    Q_pn_use <= 1'b1;
+                    Q_pn_use   <= 1'b1;
+                    S_vid_hold <= 1'b0;
                     C_mode   <= 1'b0;
                     C_ref    <= S_cur_key;
                     S_st     <= S_VIDW;
                 end else if (Q_pp != 2'd0) begin
-                    Q_pp_use <= 1'b1;
+                    Q_pp_use   <= 1'b1;
+                    S_vid_hold <= 1'b0;
                     C_mode   <= 1'b1;
                     C_ref    <= S_cur_key;
                     S_st     <= S_VIDW;
@@ -1012,8 +1020,12 @@ localparam S_SIG_C  = 6'd47;    // DEBUG: MBR signature 0x55AA check
             S_VSET: begin
                 S_settle <= S_settle + 22'd1;
                 if (S_settle == 22'h2625A0) begin   // 2.5e6 clocks = 25 ms
-                    C_go <= 1'b1;
-                    S_st <= S_SCAN_W;
+                    if (S_vid_hold) begin
+                        S_st <= S_KEY;             // keep the clip's last frame
+                    end else begin
+                        C_go <= 1'b1;
+                        S_st <= S_SCAN_W;
+                    end
                 end
             end
 

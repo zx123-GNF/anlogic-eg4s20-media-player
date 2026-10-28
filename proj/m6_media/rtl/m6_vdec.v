@@ -113,7 +113,14 @@ module m6_vdec #(
     reg  [15:0]  S_aud_n;
     reg  [15:0]  S_aud_i;
     reg  [31:0]  S_frames;   // frame count from the file header
-    reg  [8:0]  S_rows;     // source rows emitted in the current frame
+    //  M6 timing: the frames still to play and the audio bytes still to read are
+    //  kept as DOWN counters.  "value == 1" is a wide AND (two LUT levels) while
+    //  the M5 form "counter + 1 >= limit" put a 16 bit adder and a 16 bit
+    //  relational compare in series and became the worst path of the M6 design
+    //  (SWNS -0.543 ns at 100 MHz: 10.263 ns of logic plus routing).
+    reg  [15:0] S_fr_left;  // frames still to play in this clip (>= 1)
+    reg  [16:0] S_aud_left; // audio bytes still to read in this frame
+    reg  [8:0]   S_rows;     // source rows emitted in the current frame
     reg  [31:0] S_endv;     // S_vbyt when the first end-of-frame token was seen
     reg         S_endv_cap;
 
@@ -282,6 +289,8 @@ module m6_vdec #(
             S_aud_n      <= 16'd0;
             S_aud_i      <= 16'd0;
             S_frames     <= 32'd0;
+            S_fr_left    <= 16'd1;
+            S_aud_left   <= 17'd0;
             S_aud_lo     <= 1'b0;
             S_aud_hi     <= 8'd0;
             S_pix        <= 8'd0;
@@ -364,10 +373,12 @@ module m6_vdec #(
                         if (S_bpp_a == 16'd1) begin
                             S_align_b <= 1'b0;
                             S_frames  <= S_fr_n;
+                            S_fr_left <= S_fr_n[15:0];
                             S_st      <= V_FRAME;
                         end else if (S_bpp_b == 16'd1) begin
                             S_align_b <= 1'b1;
                             S_frames  <= S_fr_n;
+                            S_fr_left <= S_fr_n[15:0];
                             S_st      <= V_ALIGN1;      // swallow leftover byte
                         end else begin
                             O_err <= 3'd1;              // not a RGB332 M5V1
@@ -403,6 +414,11 @@ module m6_vdec #(
                         S_len   <= S_len_w;
                         S_aud_n <= (S_fhdr[23:8] > 16'd8000) ? 16'd0
                                                            : S_fhdr[23:8];
+                        //  audio bytes of this frame = 2 * aud_n (mono s16) as a
+                        //  down counter, see the declaration comment
+                        S_aud_left <= ((S_fhdr[23:8] == 16'd0) ||
+                                       (S_fhdr[23:8] > 16'd8000))
+                                      ? 17'd0 : {S_fhdr[23:8], 1'b0};
                         S_aud_i <= 16'd0;
                         S_x     <= 9'd0;
                         S_px    <= 32'd0;
@@ -543,15 +559,16 @@ module m6_vdec #(
                         O_aud_data <= {I_byte, S_aud_hi};   // {MSB, LSB}
                         S_aud_lo   <= 1'b0;
                     end
-                    S_aud_i <= S_aud_i + 16'd1;
-                    if ((S_aud_i + 16'd1) >= {S_aud_n, 1'b0}) S_st <= V_DONE;
+                    S_aud_i    <= S_aud_i + 16'd1;
+                    S_aud_left <= S_aud_left - 17'd1;
+                    if (S_aud_left == 17'd1) S_st <= V_DONE;
                 end
             end
             //------------------------------------------------- frame done
             V_DONE: begin
                 O_pg_done <= 1'b1;
                 O_pg_page <= I_start_page ^ O_frame_cnt[0];
-                if ((O_frame_cnt + 16'd1) >= S_frames[15:0]) begin
+                if (S_fr_left == 16'd1) begin
                     //  end of the clip: the stream loops back to the file header,
                     //  so the decoder must resync on "M5V1" instead of reading
                     //  the next frame block header.  M6 additionally reports it,
@@ -560,9 +577,11 @@ module m6_vdec #(
                     //  or resets it, so the last frame stays on screen.
                     O_clip_end  <= 1'b1;
                     O_frame_cnt <= 16'd0;
+                    S_fr_left   <= S_frames[15:0];
                     S_st        <= V_HDR_M;
                 end else begin
                     O_frame_cnt <= O_frame_cnt + 16'd1;
+                    S_fr_left   <= S_fr_left - 16'd1;
                     S_st        <= V_FRAME;
                 end
             end
