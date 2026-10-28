@@ -61,5 +61,5 @@ if (-not $ok) {
             Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() }) -join "`n"
     throw "flash FAILED (elapsed $([math]::Round($sw.Elapsed.TotalSeconds,1)) s)`n$err`nlog: $log"
 }
-Write-Host ("OK  flashed {0} -> SRAM, {1:N1} s  (log: {2})" -f `
-            (Split-Path -Leaf $Bit), $sw.Elapsed.TotalSeconds, $log)
+Write-Host ("OK  flashed {0} -> {1}, {2:N1} s  (log: {3})" -f `
+            (Split-Path -Leaf $Bit), $Mode, $sw.Elapsed.TotalSeconds, $log)
