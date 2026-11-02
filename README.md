@@ -6,7 +6,7 @@
 
 > 状态时间戳：**2026-10-28**。比赛交稿截止 **2026-11-04 18:00**，决赛 11/20–22。
 >
-> **当前交付版本 = `proj/m6_media`（顶层 `m6_top`）**：TF 卡里的照片（`IMGnnnn.BMP`）和视频
+> **最终版 = `proj/m6_final`（M6 改名而来，顶层 `m6_top`）**：TF 卡里的照片（`IMGnnnn.BMP`）和视频
 > （`VIDnnnn.M5V`）合成**一个播放列表**，上电自启动顺序播放，视频带 HDMI 内嵌音频；bit 已固化在
 > SPI 配置 Flash 里，断电重启仍然生效。
 
@@ -21,7 +21,7 @@
 | M3 | `proj/m3_720p` | M2 + 数码管 + 短按换图 + 长按暂停 + 3 s 自动轮播 | ✅ **通过**（数码管/按键/换图实测正常） |
 | M4 | `proj/m4_720p` | M3 + WM8960 音频（I²C 初始化 + I²S + 1 kHz 正弦） | ✅ 通过（耳机 1 kHz 出声） |
 | M5 | `proj/m5_video` | M5V1 视频软解码 + 双页环形写 + HDMI 内嵌音频 | ✅ **通过**（画面 + 显示器喇叭原声） |
-| **M6** | **`proj/m6_media`** | **照片 + 视频混排播放列表、按键/暂停浏览、数码管总数+序号、SPI Flash 固化** | ✅ **通过**（2026-10-28，断电自启动） |
+| **M6（最终版）** | **`proj/m6_final`** | **照片 + 视频混排播放列表、按键/暂停浏览、数码管总数+序号、SPI Flash 固化** | ✅ **通过**（2026-10-28，断电自启动；`program_spi` + `verify_spi` 均通过） |
 
 > 老的 640×480 工程（`m0_hdmi`、`m1_sdram_fb`、`m2_sd_tf_bmp`、`m3_interact`、`m4_audio`）保留作
 > 历史对照与离线模型工程。**正式方案全部跑 1280×720**，原因见下「关键约束」。
@@ -30,17 +30,17 @@
 
 ```powershell
 # 编译（每个工程目录下，30~160 秒）
-cd E:\fpga-2026\dsh_code\proj\m6_media
+cd E:\fpga-2026\dsh_code\proj\m6_final
 powershell -NoProfile -ExecutionPolicy Bypass -File .\make_proj_files.ps1   # 改了 RTL 文件清单才需要
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1             # 打印 SWNS/HWNS
 
 # 烧录 SRAM（临时，约 19 s；AL-LINK 插好 + 板上电即可，不用开 BitWriter 图形界面）
 cd E:\fpga-2026\dsh_code
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final
 
 # 固化到 SPI 配置 Flash（约 87 s）+ 回读校验（约 28 s），断电重启仍然生效
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode program_spi
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode verify_spi
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode program_spi
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode verify_spi
 
 # 读调试串口（板子 USB-C = CH340E，115200 8N1）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\read_uart.ps1 -Seconds 30
@@ -66,7 +66,7 @@ VID0005.M5V / VID0006.M5V       本次两段（本仓库 out/ 下由 tools/m6_en
 
 | 目录 | 内容 |
 |---|---|
-| `proj/m6_media/` | **交付工程**（`rtl/` 源码、`IO.adc` 引脚、`timing.sdc` 时钟、`make_proj_files.ps1`、`build.ps1`） |
+| `proj/m6_final/` | **交付工程**（`rtl/` 源码、`IO.adc` 引脚、`timing.sdc` 时钟、`make_proj_files.ps1`、`build.ps1`） |
 | `proj/m5_video/` | 上一版交付工程（单文件视频播放器），保留作回归对照 |
 | `proj/m*_720p/` | 各里程碑的正式工程（`proj/m*_interact`、`proj/m4_audio` 等是 640×480/离线模型工程） |
 | `docs/` | `board-test-guide.md` 上板手册、`demo-script.md` 演示脚本（§7 = M6）、`specs/` 设计规格 |

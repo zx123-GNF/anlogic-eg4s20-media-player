@@ -1,7 +1,7 @@
 # M6 里程碑报告：图文混排播放列表（M3 图片 + M5 视频 → 一个播放序列）
 
 > 板卡 AC208（AC201-EG4S20 底板 + AC601 核心板，EG4S20BG256）· TD 2026.1 SP2 ·
-> 工程 `proj/m6_media`（顶层 `m6_top`）· 片源 `tools/m6_encode.py` · 已固化到 SPI 配置 Flash
+> 工程 `proj/m6_final`（顶层 `m6_top`）· 片源 `tools/m6_encode.py` · 已固化到 SPI 配置 Flash
 
 ---
 
@@ -292,18 +292,18 @@ $py = "C:\Users\31860\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\
 # 1) TF 卡根目录（FAT32、8.3 名字）
 #    IMG0001.BMP … IMG0005.BMP   +   VID0.M5V / VID0005.M5V / VID0006.M5V
 
-# 2) 工程文件 + 构建（约 155 s；建议先删 m6_media_Runs 做干净构建）
-cd proj\m6_media
+# 2) 工程文件 + 构建（约 155 s；建议先删 m6_final_Runs 做干净构建）
+cd proj\m6_final
 powershell -NoProfile -ExecutionPolicy Bypass -File .\make_proj_files.ps1     # 重新生成 .al/.prj/settings.cfg
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1               # 打印 SWNS/HWNS
 
 # 3) 烧到 SRAM（临时，约 19 s，断电即丢）
 cd ..\..
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final
 
 # 4) 固化到 SPI 配置 Flash（约 87 s，断电重启仍生效）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode program_spi
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode verify_spi
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode program_spi
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode verify_spi
 
 # 5) 调试串口（CH340，115200 8N1，板子第二个 USB-C）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\read_uart.ps1 -Seconds 30

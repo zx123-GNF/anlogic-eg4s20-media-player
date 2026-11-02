@@ -6,7 +6,7 @@ make_engineering_report.py
 内容来自仓库中的：
   docs/specs/2026-10-21-hdmi-basic-player-design.md
   docs/research/m0..m6-report.md / bench-bringup-postmortem.md / hw-facts.md / example-arch.md
-  proj/m6_media/rtl/*.v（当前交付版本的 RTL）
+  proj/m6_final/rtl/*.v（当前交付版本的 RTL）
   TD 构建产物（资源 / 时序报告）
 """
 import os
@@ -317,7 +317,7 @@ TABLE(['项目', '内容'], [
     ['赛题', '2026 安路科技 FPGA 赛道 · 第 1 题 · 选题一（FPGA 多媒体播放器）'],
     ['硬件平台', 'AC208 开发板 = AC201-EG4S20 底板 + AC601 核心板，FPGA 为 EG4S20BG256'],
     ['开发工具', 'Tang Dynasty 2026.1 SP2（TD），AL-LINK JTAG 下载'],
-    ['工程路径', r'E:\fpga-2026\dsh_code（git 仓库），最终交付工程 proj\m6_media'],
+    ['工程路径', r'E:\fpga-2026\dsh_code（git 仓库），最终交付工程 proj\m6_final'],
     ['阶段划分', '阶段一 HDMI 显示平台（M0+M1）/ 阶段二 TF 卡图像播放与交互（M2+M3）/ '
                  '阶段三 音频子系统（M4）/ 阶段四 音视频一体播放（M5）/ '
                  '阶段五 图文混排播放列表（M6）'],
@@ -484,7 +484,7 @@ TABLE(['维度', '结果'], [
     ['时序', 'Setup SWNS +0.102 ns、Hold HWNS +0.003 ns，四个时钟域全部收敛、零违例端点'],
     ['代码', 'RTL 约 7 700 行（自写 + 厂商 IP 例化），Python 工具约 1 500 行（编码器 + 码率评估 + 离线模型）'],
     ['固化', 'bit 已写入 SPI 配置 Flash 并回读校验，断电重启自行加载（现场无需下载器）'],
-    ['交付', 'proj/m6_media 工程、tools/m6_encode.py 片源编码器、out/VID000{5,6}.M5V 示例片源、七份里程碑报告'],
+    ['交付', 'proj/m6_final 工程、tools/m6_encode.py 片源编码器、out/VID000{5,6}.M5V 示例片源、七份里程碑报告'],
 ], widths=[2.2, 13.6], caption='最终成果速览')
 
 PAGEBREAK()
@@ -1055,8 +1055,8 @@ H('6.6  固化到 SPI 配置 Flash', 2)
 P('演示当天不能指望笔记本 + 下载线，所以最后把 bit 写进板子的 SPI 配置 Flash：')
 CODE([
     r'# 固化（约 87 s）+ 回读校验（约 28 s），掉电重启仍然生效',
-    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode program_spi',
-    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode verify_spi',
+    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode program_spi',
+    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode verify_spi',
 ], caption='SPI Flash 固化流程')
 P('上位机通过 AL-LINK 用 BitWriter 的 program_spi / verify_spi 模式完成，无需额外工具。'
   '实测：断电、拔掉 USB 下载线、重新上电，板子自行加载 M6 并进入播放列表。')
@@ -1182,7 +1182,7 @@ H('9  成果、复现与展望', 1)
 
 H('9.1  最终交付物', 2)
 TABLE(['交付物', '位置', '说明'], [
-    ['最终工程', r'proj\m6_media', 'RTL + 约束 + 一键构建脚本（顶层 m6_top），混排播放列表'],
+    ['最终工程', r'proj\m6_final', 'RTL + 约束 + 一键构建脚本（顶层 m6_top），混排播放列表'],
     ['片源编码器', r'tools\m6_encode.py', '任意视频 → M5V1（RGB332 RLE + 48 kHz 单声道 + 逐帧字节预算）'],
     ['码率评估', r'tools\measure_m5_bitrate.py', '只取几十帧就能估出「按这个码率编，链路够不够」'],
     ['示例片源', r'out\VID0005.M5V / VID0006.M5V', '19.7 MB / 13.0 MB，插到 TF 卡 FAT32 根目录'],
@@ -1201,17 +1201,17 @@ CODE([
     r'python tools\m6_encode.py <video> out --name VID0007.M5V --max-kb 36',
     '',
     '# 2) 生成工程文件 + 全清构建（约 158 s，会打印 SWNS/HWNS）',
-    r'cd E:\fpga-2026\dsh_code\proj\m6_media',
+    r'cd E:\fpga-2026\dsh_code\proj\m6_final',
     r'powershell -NoProfile -ExecutionPolicy Bypass -File .\make_proj_files.ps1',
     r'powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1',
     '',
     '# 3) 烧 SRAM 调试（约 19 s；烧完拔插一次 HDMI 让显示器重新锁屏）',
     r'cd E:\fpga-2026\dsh_code',
-    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media',
+    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final',
     '',
     '# 4) 固化到 SPI 配置 Flash（约 87 s）+ 回读校验（约 28 s），断电重启仍生效',
-    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode program_spi',
-    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_media -Mode verify_spi',
+    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode program_spi',
+    r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\flash.ps1 -Proj m6_final -Mode verify_spi',
     '',
     '# 5) 调试串口（CH340，115200 8N1，板子第二个 USB-C）',
     r'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\read_uart.ps1 -Seconds 30',
@@ -1270,7 +1270,7 @@ CODE([
     r'│   ├─ m4_audio/       阶段三：音频（离线模型工程）',
     r'│   ├─ m4_720p/        阶段三：基于 720p 播放器的音频版',
     r'│   ├─ m5_video/       阶段四：音视频一体播放（m5_top）',
-    r'│   └─ m6_media/       阶段五：最终交付工程（m6_top，混排播放列表 + 固化）',
+    r'│   └─ m6_final/       阶段五：最终交付工程（m6_top，混排播放列表 + 固化）',
     r'├─ tools/              flash.ps1 / m5_encode.py / m6_encode.py / measure_m5_bitrate.py / read_uart.ps1 ...',
     r'├─ docs/               specs/ research/（m0..m6-report.md）/ demo-script.md board-test-guide.md',
     r'├─ out/                生成的片源（VID0.M5V / VID0005.M5V / VID0006.M5V，不入库）',

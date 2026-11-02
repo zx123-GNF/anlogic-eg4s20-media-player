@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Project Version="3" Minor="2" Path="E:/fpga-2026/dsh_code/proj/m6_media/m6_media">
+<Project Version="3" Minor="2" Path="E:/fpga-2026/dsh_code/proj/m6_final/m6_final">
     <Project_Created_Time></Project_Created_Time>
     <TD_Version>6.2.190657</TD_Version>
-    <Name>m6_media</Name>
+    <Name>m6_final</Name>
     <HardWare>
         <Family>EG4</Family>
         <Device>EG4S20BG256</Device>
