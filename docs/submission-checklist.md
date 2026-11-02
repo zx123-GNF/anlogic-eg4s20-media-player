@@ -10,7 +10,7 @@
 - [x] **SPI 配置 Flash 固化**：`program_spi` 约 87 s、`verify_spi` 约 28 s 均通过，断电重启约 2 s 自启动
 - [x] **五阶段工程汇报** Word：`docs/report/安路赛道第1题_五阶段工程汇报.docx`
 - [x] **作品报告**（官方模板）Word：`docs/competition/安路赛道第1题_作品报告_图文混排多媒体播放器.docx`
-- [x] **代码包**：`release/fpga安路一题代码.zip`（M0~M6 全部阶段代码 + 全部调试日志 + 阶段调试报告）
+- [x] **代码包**：`release/fpga安路一题代码.rar`（M0~M6 全部阶段代码 + 全部调试日志 + 阶段调试报告）
 - [x] 上板手册 `docs/board-test-guide.md`、演示脚本 `docs/demo-script.md`（§7 = M6）
 
 ## 待办
@@ -26,7 +26,7 @@
 |---|---|
 | 工程源码 + 约束 + 构建脚本 | `proj/m6_final/`（`rtl/`、`IO.adc`、`timing.sdc`、`build.ps1`、`make_proj_files.ps1`） |
 | 片源编码工具 | `tools/m6_encode.py`（`--max-kb 36`） |
-| 代码压缩包 | `release/fpga安路一题代码.zip` |
+| 代码压缩包 | `release/fpga安路一题代码.rar` |
 | 五阶段报告 | `docs/report/` |
 | 作品报告（模板） | `docs/competition/` |
 | 里程碑与 bug 复盘 | `docs/research/m0..m6-report.md`、`bench-bringup-postmortem.md` |

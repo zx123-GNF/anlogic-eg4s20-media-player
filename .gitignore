@@ -54,4 +54,7 @@ __pycache__/
 out/
 
 # ---- 交付压缩包（要上传到仓库）----
-!release/*.zip
+!release/*.zip
+
+# ---- 交付压缩包（要上传到仓库）----
+!release/*.rar
