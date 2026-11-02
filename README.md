@@ -48,7 +48,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\read_uart.ps1 -Secon
 
 **烧完一定要拔插一次 HDMI 线**：这块便携屏在 FPGA 重配置导致 TMDS 中断后不会自己重新锁定。
 
-## TF 卡内容（M6 交付版）
+## TF 卡内容（M6 最终版）
 
 FAT32，根目录（8.3 名字）：
 
@@ -66,7 +66,8 @@ VID0005.M5V / VID0006.M5V       本次两段（本仓库 out/ 下由 tools/m6_en
 
 | 目录 | 内容 |
 |---|---|
-| `proj/m6_final/` | **交付工程**（`rtl/` 源码、`IO.adc` 引脚、`timing.sdc` 时钟、`make_proj_files.ps1`、`build.ps1`） |
+| `proj/m6_final/` | **最终版工程**（M6 改名而来；`rtl/` 源码、`IO.adc` 引脚、`timing.sdc` 时钟、`make_proj_files.ps1`、`build.ps1`） |
+| `release/` | 代码包 `fpga安路一题代码.zip`（全部阶段代码 + 全部调试日志，5.8 MB） |
 | `proj/m5_video/` | 上一版交付工程（单文件视频播放器），保留作回归对照 |
 | `proj/m*_720p/` | 各里程碑的正式工程（`proj/m*_interact`、`proj/m4_audio` 等是 640×480/离线模型工程） |
 | `docs/` | `board-test-guide.md` 上板手册、`demo-script.md` 演示脚本（§7 = M6）、`specs/` 设计规格 |
@@ -92,4 +93,5 @@ VID0005.M5V / VID0006.M5V       本次两段（本仓库 out/ 下由 tools/m6_en
 
 见 [`docs/submission-checklist.md`](docs/submission-checklist.md)。设计报告里的「调试过程」章节直接用
 [`docs/research/bench-bringup-postmortem.md`](docs/research/bench-bringup-postmortem.md)，
-五阶段汇总报告见 [`docs/report/`](docs/report/)。
+五阶段汇总报告见 [`docs/report/`](docs/report/)，可提交的完整代码包见
+[`release/fpga安路一题代码.zip`](release/)。
